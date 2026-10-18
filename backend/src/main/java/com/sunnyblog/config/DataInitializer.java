@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 
 /**
- * 首次启动时创建后台管理员账号（默认 admin / admin123，可通过环境变量覆盖）。
+ * 首次启动时创建后台管理员账号（用户名默认月白，密码必须通过环境变量配置）。
  */
 @Slf4j
 @Component

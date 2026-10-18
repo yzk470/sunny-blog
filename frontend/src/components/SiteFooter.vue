@@ -15,7 +15,7 @@ const year = new Date().getFullYear()
       <div class="footer-brand">
         <div class="footer-logo">
           <span class="footer-sun">☀</span>
-          <span>晴日小筑</span>
+          <span>月白小筑</span>
         </div>
         <p class="footer-slogan">
           {{ profile?.footerText || '愿你的每一天，都有阳光落在肩上。' }}
@@ -55,7 +55,7 @@ const year = new Date().getFullYear()
     </div>
 
     <div class="container footer-bottom">
-      <span>© {{ year }} 晴日小筑 · 保留所有温柔</span>
+      <span>© {{ year }} 月白小筑 · 保留所有温柔</span>
       <span class="footer-tech">Vue 3 + TypeScript · Spring Boot + MyBatis-Plus · Redis</span>
     </div>
   </footer>

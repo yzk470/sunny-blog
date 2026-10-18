@@ -70,7 +70,7 @@ watch(
       <RouterLink to="/admin/dashboard" class="admin-brand" @click="closeSidebar">
         <span class="admin-brand-sun">☀</span>
         <span class="admin-brand-text">
-          <strong>晴日小筑</strong>
+          <strong>月白小筑</strong>
           <span>SUNNY ADMIN</span>
         </span>
       </RouterLink>

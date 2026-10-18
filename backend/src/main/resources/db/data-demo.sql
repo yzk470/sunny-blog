@@ -1,4 +1,4 @@
--- 晴日小筑 · 演示数据（可重复执行，不会产生重复记录）
+-- 月白小筑 · 演示数据（可重复执行，不会产生重复记录）
 
 INSERT INTO blog_category (name, slug, description, color, sort_order, created_at)
 SELECT '生活随笔', 'life', '把平凡的日子，写成亮晶晶的句子。', '#F7B7C8', 1, CURRENT_TIMESTAMP

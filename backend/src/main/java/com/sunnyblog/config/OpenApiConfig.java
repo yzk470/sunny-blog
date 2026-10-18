@@ -17,10 +17,10 @@ public class OpenApiConfig {
         String schemeName = "bearerAuth";
         return new OpenAPI()
                 .info(new Info()
-                        .title("晴日小筑 API")
+                        .title("月白小筑 API")
                         .description("个人博客前台与后台接口文档。后台接口需先调用登录接口获取 JWT。")
                         .version("1.0.0")
-                        .contact(new Contact().name("晴日小筑")))
+                        .contact(new Contact().name("月白小筑")))
                 .addSecurityItem(new SecurityRequirement().addList(schemeName))
                 .components(new Components().addSecuritySchemes(schemeName,
                         new SecurityScheme()

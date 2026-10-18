@@ -63,7 +63,7 @@ onMounted(async () => {
     <div class="dashboard-hero">
       <div>
         <p class="dashboard-date">{{ todayLabel() }} · {{ greeting() }}</p>
-        <h1>欢迎回到晴日小筑</h1>
+        <h1>欢迎回到月白小筑</h1>
         <p class="dashboard-sub">
           今天也有人在等你的新故事。已经有
           <strong>{{ dashboard?.publishedCount ?? 0 }}</strong> 篇文章在阳光下啦。

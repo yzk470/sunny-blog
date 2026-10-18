@@ -23,7 +23,7 @@ const aboutText = computed(
     profile.value?.aboutContent ||
     `# 嗨，我是${profile.value?.nickname || '月白'} 👋
 
-欢迎来到晴日小筑。这里没有宏大的叙事，只有一些认真生活的碎片。
+欢迎来到月白小筑。这里没有宏大的叙事，只有一些认真生活的碎片。
 
 白天写代码，傍晚追晚霞，偶尔在厨房里研究一杯不太成功的拿铁。
 

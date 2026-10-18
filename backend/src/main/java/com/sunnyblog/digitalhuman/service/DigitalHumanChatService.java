@@ -340,7 +340,7 @@ public class DigitalHumanChatService {
         StringBuilder prompt = new StringBuilder();
         prompt.append(character.getSystemPrompt().replace("{character_name}", character.getCharacterName()))
                 .append("\n\n【当前博客】\n")
-                .append("博客名称：晴日小筑；站长：月白。这里的文章主要记录 AI Agent、Spring AI、LangGraph4j 与工程实践。\n");
+                .append("博客名称：月白小筑；站长：月白。这里的文章主要记录 AI Agent、Spring AI、LangGraph4j 与工程实践。\n");
 
         String context = blogContext(articleSlug);
         if (!context.isBlank()) {

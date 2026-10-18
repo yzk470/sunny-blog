@@ -71,7 +71,7 @@ async function loadPost(slug: string) {
     post.value = result
     headings.value = extractHeadings(renderContent.value)
     liked.value = localStorage.getItem(`sunnyblog_liked:${slug}`) === '1'
-    document.title = `${result.title} · 晴日小筑`
+    document.title = `${result.title} · 月白小筑`
     const description = result.summary || ''
     const meta = document.querySelector('meta[name="description"]')
     if (meta && description) meta.setAttribute('content', description)
@@ -213,7 +213,7 @@ onUnmounted(() => {
         <figure v-if="!coverBroken" class="article-cover">
           <img :src="cover" :alt="post.title" @error="coverBroken = true" />
           <figcaption>
-            <span>☀ {{ post.category?.name || '晴日小筑' }}</span>
+            <span>☀ {{ post.category?.name || '月白小筑' }}</span>
             <span>{{ formatDate(post.publishedAt || post.createdAt) }}</span>
           </figcaption>
         </figure>

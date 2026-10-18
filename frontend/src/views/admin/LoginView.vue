@@ -10,16 +10,10 @@ const router = useRouter()
 const auth = useAuthStore()
 const toast = useToastStore()
 
-const form = reactive({ username: 'admin', password: '' })
+const form = reactive({ username: '月白', password: '' })
 const showPassword = ref(false)
 const error = ref('')
 const submitting = ref(false)
-
-function fillDemo() {
-  form.username = 'admin'
-  form.password = 'admin123'
-  error.value = ''
-}
 
 async function submit() {
   error.value = ''
@@ -67,15 +61,15 @@ onMounted(() => {
         <RouterLink to="/" class="login-brand">
           <span class="login-brand-sun">☀</span>
           <span>
-            <strong>晴日小筑</strong>
-            <small>SUNNY NOTES</small>
+            <strong>月白小筑</strong>
+            <small>MOONLIT NOTES</small>
           </span>
         </RouterLink>
         <div class="visual-quote">
           <p class="quote-eyebrow">WELCOME BACK, SUNSHINE</p>
           <h1>把每一段<br /><span>好天气</span>收进文字里。</h1>
           <p class="quote-desc">
-            这里是晴日小筑的后台。写下新的故事，回复远方的回声，或者只是看看今天的阳光。
+            这里是月白小筑的后台。写下新的故事，回复远方的回声，或者只是看看今天的阳光。
           </p>
           <div class="visual-chips">
             <span>📝 文章管理</span>
@@ -146,21 +140,13 @@ onMounted(() => {
           </button>
         </form>
 
-        <div class="demo-hint">
-          <div>
-            <strong>演示账号</strong>
-            <p>admin / admin123</p>
-          </div>
-          <button type="button" class="demo-fill" @click="fillDemo">一键填入</button>
-        </div>
-
         <div class="login-footer">
           <RouterLink to="/">← 回到博客首页</RouterLink>
           <span>忘记密码？请查看 README 重置</span>
         </div>
       </div>
 
-      <p class="login-copyright">© {{ new Date().getFullYear() }} 晴日小筑 · 愿今天也有好心情</p>
+      <p class="login-copyright">© {{ new Date().getFullYear() }} 月白小筑 · 愿今天也有好心情</p>
     </div>
   </div>
 </template>
@@ -554,44 +540,6 @@ onMounted(() => {
   width: 16px;
   height: 16px;
   border-width: 2px;
-}
-
-.demo-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 22px;
-  padding: 13px 16px;
-  border-radius: 13px;
-  background: #fff9ec;
-  border: 1px dashed rgba(246, 201, 107, 0.4);
-}
-
-.demo-hint strong {
-  color: #9c7a33;
-  font-size: 0.68rem;
-}
-
-.demo-hint p {
-  margin-top: 1px;
-  color: #a48b5a;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 0.72rem;
-}
-
-.demo-fill {
-  padding: 5px 11px;
-  border: 1px solid rgba(246, 201, 107, 0.5);
-  border-radius: 999px;
-  background: #fff;
-  color: #9c7a33;
-  font-size: 0.64rem;
-  font-weight: 800;
-}
-
-.demo-fill:hover {
-  background: var(--butter);
 }
 
 .login-footer {

@@ -10,8 +10,8 @@ const navItems = [
   { label: '首页', to: '/' },
   { label: '文章', to: '/posts' },
   { label: '归档', to: '/archives' },
-  { label: '关于', to: '/about' },
   { label: '数字人', to: '/digital-human' },
+  { label: '关于', to: '/about' },
   { label: '留言板', to: '/guestbook' },
 ]
 
@@ -51,11 +51,11 @@ watch(
 <template>
   <header class="site-header" :class="{ scrolled, 'menu-open': menuOpen }">
     <div class="container header-inner">
-      <RouterLink to="/" class="brand" aria-label="晴日小筑首页">
+      <RouterLink to="/" class="brand" aria-label="月白小筑首页">
         <span class="brand-sun" aria-hidden="true"></span>
         <span class="brand-text">
-          <strong>晴日小筑</strong>
-          <small>SUNNY NOTES</small>
+          <strong>月白小筑</strong>
+          <small>MOONLIT NOTES</small>
         </span>
       </RouterLink>
 

@@ -1,4 +1,4 @@
-# 晴日小筑 · Sunny Blog
+# 月白小筑 · Sunny Blog
 
 > 一个阳光明媚的个人博客。奶油白、淡蓝、淡粉，记录生活、代码、书与远方。
 >
@@ -6,7 +6,7 @@
 >
 > 公开 GitHub 仓库不包含第三方 PMX 角色模型、贴图和本地下载的动作文件；请把它们放在 `frontend/public/models/` 与 `frontend/public/motions/local/` 下再运行（两个目录已加入 `.gitignore`）。
 
-![晴日小筑首页](docs/screenshots/home.png)
+![月白小筑首页](docs/screenshots/home.png)
 
 ## ✨ 项目特色
 
@@ -155,8 +155,8 @@ npm run dev
 ### 3. 登录后台
 
 - 地址：<http://127.0.0.1:5173/admin/login>
-- 账号：`admin`
-- 密码：`admin123`
+- 账号：`月白`
+- 密码：见本地 `backend/application-local.yml` 或服务器 `/opt/sunny-blog/.env`
 
 > 生产环境务必通过环境变量修改默认账号与密码，并更换 JWT 密钥。
 
@@ -403,8 +403,8 @@ mvn spring-boot:run "-Dspring-boot.run.profiles=mysql"
 | `DB_PASSWORD` | `root` | 数据库密码 |
 | `JWT_SECRET` | 开发默认值 | JWT 签名密钥，生产必须更换 |
 | `JWT_EXPIRE_HOURS` | `168` | Token 有效期（小时） |
-| `ADMIN_USERNAME` | `admin` | 首次启动创建的管理员用户名 |
-| `ADMIN_PASSWORD` | `admin123` | 首次启动创建的管理员密码 |
+| `ADMIN_USERNAME` | `月白` | 首次启动创建的管理员用户名 |
+| `ADMIN_PASSWORD` | `change-me` | 首次启动创建的管理员密码，生产必须设置 |
 | `ADMIN_NICKNAME` | `月白` | 管理员昵称 |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 允许的前端来源 |
 | `DEEPSEEK_API_KEY` | 空 | DeepSeek API Key（数字人对话） |

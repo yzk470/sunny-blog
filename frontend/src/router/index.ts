@@ -152,8 +152,8 @@ router.beforeEach(async (to) => {
 router.afterEach((to) => {
   const title = typeof to.meta.title === 'string' ? to.meta.title : ''
   document.title = title && to.name !== 'home'
-    ? `${title} · 晴日小筑`
-    : '晴日小筑 · 把日子过成一首明亮的诗'
+    ? `${title} · 月白小筑`
+    : '月白小筑 · 把日子过成一首明亮的诗'
 })
 
 export default router

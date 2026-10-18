@@ -1,4 +1,4 @@
--- 晴日小筑 · H2 (MySQL 兼容模式) 建表脚本
+-- 月白小筑 · H2 (MySQL 兼容模式) 建表脚本
 CREATE TABLE IF NOT EXISTS blog_user (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) NOT NULL,
