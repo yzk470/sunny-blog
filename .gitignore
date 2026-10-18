@@ -11,6 +11,10 @@ frontend/.vite/
 frontend/.npm-cache/
 .npm-cache/
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Local build / verification artifacts
 .m2/
 .tmp/

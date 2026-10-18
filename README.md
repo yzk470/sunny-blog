@@ -590,6 +590,26 @@ curl https://api.deepseek.com/v1/chat/completions `
 7. 配置 MySQL 与 Redis 的定期备份；
 8. 封面上传默认保存在 `backend/data/uploads`，由 `/api/uploads/**` 提供访问；生产环境请使用持久盘或对象存储，并备份该目录。
 
+### 自动部署到已配置服务器
+
+服务器凭据放在 `.tmp/server-credentials.txt`（已 gitignore）：
+
+```ini
+host=服务器 IP
+port=22
+username=root
+password=服务器密码
+domain=https://www.bluish-white.top
+```
+
+执行：
+
+```powershell
+python scripts/deploy_prod.py
+```
+
+脚本会本地打包后端和前端、上传、替换 jar/静态文件、重启 systemd 服务并做健康检查；服务器上的 `.env`、数据库和上传目录不会被覆盖。
+
 ## 📄 License
 
 本项目为个人学习与个人博客使用示例，可自由修改与部署。演示文章、头像与 SVG 封面均为项目内原创示例素材。
