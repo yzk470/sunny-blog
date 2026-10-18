@@ -356,15 +356,18 @@
     margin-top: 14px;
     border-radius: 22px;
   }
+  #app .welcome-card {
+    display: none;
+  }
   #app .dh-stage {
-    height: 46vh;
-    min-height: 320px;
+    height: 42vh;
+    min-height: 300px;
   }
   #app .dh-chat {
-    min-height: 420px;
+    min-height: 300px;
   }
   #app .messages {
-    max-height: 360px;
+    max-height: 220px;
   }
   #app .chat-head {
     padding: 14px 14px 8px;
