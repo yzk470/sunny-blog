@@ -1,0 +1,43 @@
+# Java
+backend/target/
+backend/data/
+backend/build.log
+*.log
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.npm-cache/
+.npm-cache/
+
+# Local build / verification artifacts
+.m2/
+.tmp/
+tmp/
+.mysql-test/
+.browser-profile/
+.browser-profile-shot/
+backup/
+
+# Original 3D reference project (large duplicate assets, not part of the blog)
+3d-digital-humen/
+
+# Locally downloaded motion assets with no-redistribution terms
+action/
+frontend/public/motions/local/
+
+# Third-party PMX character models/textures (not redistributable)
+frontend/public/models/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local env
+.env.local
+.env.*.local
+backend/application-local.yml

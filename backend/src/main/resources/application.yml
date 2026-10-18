@@ -1,0 +1,99 @@
+server:
+  port: ${SERVER_PORT:8090}
+  shutdown: graceful
+
+spring:
+  application:
+    name: sunny-blog
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  jackson:
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+  cache:
+    type: redis
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: 2s
+  ai:
+    openai:
+      api-key: ${DEEPSEEK_API_KEY:}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      chat:
+        options:
+          model: ${DEEPSEEK_MODEL:deepseek-flash}
+          temperature: ${DEEPSEEK_TEMPERATURE:0.7}
+  lifecycle:
+    timeout-per-shutdown-phase: 10s
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  info:
+    title: 晴日小筑 API
+    version: 1.0.0
+    description: 阳光明媚的个人博客后端接口
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:sunny-blog-deepseek-2025-secret-key-please-change-me-in-production-0123456789}
+    expire-hours: ${JWT_EXPIRE_HOURS:168}
+  admin:
+    username: ${ADMIN_USERNAME:admin}
+    password: ${ADMIN_PASSWORD:admin123}
+    nickname: ${ADMIN_NICKNAME:月白}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+  digital-human:
+    audio-dir: ${DIGITAL_HUMAN_AUDIO_DIR:./data/digital-human/audio}
+    motion-dir: ${DIGITAL_HUMAN_MOTION_DIR:./data/digital-human/motions}
+    max-history: ${DIGITAL_HUMAN_MAX_HISTORY:10}
+    max-context-chars: ${DIGITAL_HUMAN_MAX_CONTEXT_CHARS:5000}
+
+hunyuan:
+  motion:
+    api-key: ${HUNYUAN_MOTION_API_KEY:}
+    base-url: ${HUNYUAN_MOTION_BASE_URL:https://tokenhub.tencentmaas.com}
+    model: ${HUNYUAN_MOTION_MODEL:hy-3d-motion}
+
+aliyun:
+  tts:
+    api-key: ${ALIYUN_TTS_API_KEY:}
+    api-url: ${ALIYUN_TTS_API_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
+    model: ${ALIYUN_TTS_MODEL:cosyvoice-v3-flash}
+    voice: ${ALIYUN_TTS_VOICE:longyingxiao_v3}
+    sample-rate: ${ALIYUN_TTS_SAMPLE_RATE:24000}
+    response-format: ${ALIYUN_TTS_FORMAT:wav}
+
+logging:
+  level:
+    root: info
+    com.sunnyblog: info

@@ -1,0 +1,44 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: sunny-blog-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: sunny_blog
+      MYSQL_USER: sunny
+      MYSQL_PASSWORD: sunnyblog123
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3307:3306"
+    volumes:
+      - sunny-blog-mysql-data:/var/lib/mysql
+      - ./backend/sql/schema-mysql.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backend/src/main/resources/db/data-demo.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot123"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: sunny-blog-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "sunnyblog123", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - sunny-blog-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "sunnyblog123", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  sunny-blog-mysql-data:
+  sunny-blog-redis-data:
