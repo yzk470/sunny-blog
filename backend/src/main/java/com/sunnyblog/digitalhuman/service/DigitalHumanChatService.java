@@ -44,6 +44,7 @@ public class DigitalHumanChatService {
     private final DigitalHumanCharacterService characterService;
     private final DigitalHumanSessionService sessionService;
     private final DigitalHumanTtsService ttsService;
+    private final DigitalHumanArticleTools articleTools;
     private final PostMapper postMapper;
     private final int maxHistory;
     private final int maxContextChars;
@@ -52,6 +53,7 @@ public class DigitalHumanChatService {
                                    DigitalHumanCharacterService characterService,
                                    DigitalHumanSessionService sessionService,
                                    DigitalHumanTtsService ttsService,
+                                   DigitalHumanArticleTools articleTools,
                                    PostMapper postMapper,
                                    @Value("${app.digital-human.max-history:10}") int maxHistory,
                                    @Value("${app.digital-human.max-context-chars:5000}") int maxContextChars) {
@@ -60,6 +62,7 @@ public class DigitalHumanChatService {
         this.characterService = characterService;
         this.sessionService = sessionService;
         this.ttsService = ttsService;
+        this.articleTools = articleTools;
         this.postMapper = postMapper;
         this.maxHistory = maxHistory;
         this.maxContextChars = maxContextChars;
@@ -211,6 +214,7 @@ public class DigitalHumanChatService {
         return chatClient.prompt()
                 .system(system)
                 .user(userContent)
+                .functions(articleTools.searchCallback(), articleTools.readCallback())
                 .stream()
                 .content();
     }
@@ -328,6 +332,7 @@ public class DigitalHumanChatService {
         String content = chatClient.prompt()
                 .system(systemPrompt)
                 .user(userContent)
+                .functions(articleTools.searchCallback(), articleTools.readCallback())
                 .call()
                 .content();
         if (content == null || content.isBlank()) {
@@ -340,7 +345,10 @@ public class DigitalHumanChatService {
         StringBuilder prompt = new StringBuilder();
         prompt.append(character.getSystemPrompt().replace("{character_name}", character.getCharacterName()))
                 .append("\n\n【当前博客】\n")
-                .append("博客名称：月白小筑；站长：月白。这里的文章主要记录 AI Agent、Spring AI、LangGraph4j 与工程实践。\n");
+                .append("博客名称：月白小筑；站长：月白。这里的文章主要记录 AI Agent、Spring AI、LangGraph4j 与工程实践。\n")
+                .append("\n【文章工具】\n")
+                .append("用户提到具体文章、主题或想听文章讲解时，先调用 search_articles 找到文章，再调用 read_article 读取正文。")
+                .append("讲解时用自己的话概括重点，不要编造文章没有的内容，也不要逐字朗读全文。\n");
 
         String context = blogContext(articleSlug);
         if (!context.isBlank()) {
