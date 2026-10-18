@@ -106,7 +106,8 @@ export class SceneManager {
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight, false);
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-        this.renderer.toneMapping = THREE.NoToneMapping; // raw colors, no filmic desaturation
+        this.renderer.toneMapping = THREE.NoToneMapping; // keep raw anime colors, avoid filmic desaturation
+        this.renderer.toneMappingExposure = 1.0;
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -119,6 +120,33 @@ export class SceneManager {
         // Keep the canvas transparent so the Vue stage gradient/stars show through.
         this.scene.background = null;
         this.scene.fog = null;
+
+        // A soft contact shadow anchors the feet without a hard directional shadow.
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const gradient = ctx.createRadialGradient(128, 64, 6, 128, 64, 118);
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0.58)');
+        gradient.addColorStop(0.48, 'rgba(0, 0, 0, 0.2)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 256, 128);
+        const shadowTexture = new THREE.CanvasTexture(canvas);
+        shadowTexture.colorSpace = THREE.SRGBColorSpace;
+        this.contactShadow = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.25, 0.64),
+            new THREE.MeshBasicMaterial({
+                map: shadowTexture,
+                transparent: true,
+                opacity: 0.5,
+                depthWrite: false,
+            }),
+        );
+        this.contactShadow.rotation.x = -Math.PI / 2;
+        this.contactShadow.position.y = 0.006;
+        this.contactShadow.renderOrder = 1;
+        this.scene.add(this.contactShadow);
     }
 
     _initCamera() {
@@ -142,25 +170,31 @@ export class SceneManager {
     _initLights() {
         console.log('[SceneManager] Setting up lights');
 
-        // MMD-optimized lighting — balanced for anime/toon materials
-        // Reference: Three.js MMD examples + community best practices
-
-        // MMD-optimized 4-point lighting
-        const hemi = new THREE.HemisphereLight('#e8f0ff', '#7788aa', 0.55);
+        // Keep ambient low so textures keep their saturation and shadows stay readable.
+        const hemi = new THREE.HemisphereLight('#dfe9ff', '#3b4a66', 0.32);
         this.scene.add(hemi);
-        const key = new THREE.DirectionalLight('#fff5ee', 1.6);
-        key.position.set(1, 3, 2.5);
+
+        const key = new THREE.DirectionalLight('#fff1dd', 1.55);
+        key.position.set(0.8, 3.3, 3.0);
         this.scene.add(key);
-        const fill = new THREE.DirectionalLight('#ccddff', 0.45);
-        fill.position.set(-1.5, 0.8, -0.5);
+
+        const fill = new THREE.DirectionalLight('#b9d8ff', 0.28);
+        fill.position.set(-2, 1.2, 1.8);
         this.scene.add(fill);
-        const bottom = new THREE.DirectionalLight('#ffffff', 0.3);
+
+        // Warm/cool rim separates the model from the dark stage and gives it volume.
+        const rim = new THREE.DirectionalLight('#ffcfdf', 0.75);
+        rim.position.set(-1.4, 2.4, -2.8);
+        this.scene.add(rim);
+
+        const bottom = new THREE.DirectionalLight('#ffffff', 0.12);
         bottom.position.set(0, -0.5, 1.5);
         this.scene.add(bottom);
-        console.log('[SceneManager] Lights: hemi=0.55, key=1.6, fill=0.45, bottom=0.3');
+
+        console.log('[SceneManager] Lights: hemi=0.32, key=1.55, fill=0.28, rim=0.75, bottom=0.12');
     }
 
-    /** Enhance MMD MeshToonMaterial for vibrant colors */
+    /** Enhance MMD materials for richer, more solid colors. */
     _enhanceMaterials(mesh) {
         try {
             console.log('[SceneManager] Enhancing MMD materials...');
@@ -168,17 +202,34 @@ export class SceneManager {
                 if (!child.isMesh) return;
                 const mats = Array.isArray(child.material) ? child.material : [child.material];
                 mats.forEach((mat) => {
-                    if (!mat.isMeshToonMaterial) return;
-                    // Use the diffuse map as the toon gradient map for proper cel shading
+                    if (!mat) return;
+                    if (!mat.isMeshToonMaterial && !mat.isMMDToonMaterial) return;
+
+                    // MMD maps are sRGB; keep data textures (toon ramp / alpha) linear.
+                    ['map', 'emissiveMap', 'sphereMap'].forEach((slot) => {
+                        if (mat[slot] && mat[slot].isTexture) {
+                            mat[slot].colorSpace = THREE.SRGBColorSpace;
+                        }
+                    });
+                    ['gradientMap', 'alphaMap'].forEach((slot) => {
+                        if (mat[slot] && mat[slot].isTexture) {
+                            mat[slot].colorSpace = THREE.NoColorSpace;
+                        }
+                    });
+
                     if (mat.map) {
-                        mat.gradientMap = mat.map;
+                        mat.map.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
                     }
-                    // Subtle emissive to prevent dead-black unlit areas
-                    mat.emissive = new THREE.Color(0x111111);
-                    mat.emissiveIntensity = 0.15;
+
+                    // MMDLoader's ambient/emissive term tends to flatten the model.
+                    // Reduce it so the key/rim lighting can carve out the form.
+                    if (mat.emissive) {
+                        mat.emissive.multiplyScalar(0.45);
+                    }
+                    mat.emissiveIntensity = 0.75;
                 });
             });
-            console.log('[SceneManager] Materials enhanced (toon gradient + emissive)');
+            console.log('[SceneManager] Materials enhanced (sRGB, lower ambient, rim contrast)');
         } catch(e) {
             console.warn('[SceneManager] Material enhancement failed:', e.message);
         }
@@ -236,6 +287,12 @@ export class SceneManager {
 
             mesh.castShadow = true;
             mesh.receiveShadow = true;
+            mesh.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
 
             // Enhance MMD materials for vibrant colors
             this._enhanceMaterials(mesh);

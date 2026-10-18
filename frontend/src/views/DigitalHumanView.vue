@@ -1575,6 +1575,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   display: block;
+  filter: saturate(1.75) contrast(1.14) brightness(1.03);
 }
 
 .stage-aura {
