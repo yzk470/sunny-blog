@@ -45,6 +45,7 @@ public class McpController {
 
     private final McpArticleService articleService;
     private final ObjectMapper objectMapper;
+    private final String sessionId = UUID.randomUUID().toString();
 
     @Value("${app.mcp.enabled:true}")
     private boolean enabled;
@@ -66,7 +67,7 @@ public class McpController {
                     .body(errorBody(null, -32001, "MCP 认证失败"));
         }
 
-        response.setHeader("Mcp-Session-Id", UUID.randomUUID().toString());
+        response.setHeader("Mcp-Session-Id", sessionId);
         response.setHeader("Mcp-Protocol-Version", PROTOCOL_VERSION);
         response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
 
