@@ -1,0 +1,399 @@
+/* =========================================================
+   Mobile-only refinements.
+   Desktop and tablet layouts (>= 641px) are untouched.
+   ========================================================= */
+@media (max-width: 640px) {
+  /* Header: keep the brand and all three actions on one line */
+  #app .header-inner {
+    gap: 8px;
+  }
+  #app .brand {
+    gap: 8px;
+  }
+  #app .brand-sun {
+    width: 34px;
+    height: 34px;
+  }
+  #app .brand-sun::after {
+    inset: -4px;
+  }
+  #app .brand-text strong {
+    font-size: 1.02rem;
+    letter-spacing: 0.025em;
+  }
+  #app .brand-text small {
+    margin-top: 2px;
+    font-size: 0.47rem;
+    letter-spacing: 0.2em;
+  }
+  #app .header-actions {
+    gap: 6px;
+  }
+  #app .theme-toggle,
+  #app .admin-entry,
+  #app .menu-toggle {
+    width: 38px;
+    height: 38px;
+    min-height: 38px;
+    padding: 0;
+    justify-content: center;
+  }
+  #app .theme-toggle-text {
+    display: none;
+  }
+
+  /* Page banner: less empty vertical space on phones */
+  #app .page-banner,
+  #app .page-banner.compact {
+    padding: 22px 18px;
+    border-radius: 22px;
+    margin-top: 4px;
+  }
+  #app .banner-eyebrow {
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 0.61rem;
+    letter-spacing: 0.16em;
+  }
+  #app .eyebrow-sun {
+    width: 21px;
+    height: 21px;
+    font-size: 0.68rem;
+  }
+  #app .banner-title {
+    font-size: clamp(1.65rem, 7.2vw, 2.1rem);
+    line-height: 1.22;
+  }
+  #app .banner-description {
+    margin-top: 10px;
+    font-size: 0.82rem;
+    line-height: 1.7;
+  }
+  #app .banner-extra {
+    margin-top: 14px;
+  }
+
+  /* Home hero */
+  #app .hero {
+    gap: 10px;
+    padding-top: 8px;
+  }
+  #app .hero-eyebrow {
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 0.62rem;
+  }
+  #app .eyebrow-date {
+    font-size: 0.59rem;
+  }
+  #app .hero-title {
+    margin-top: 12px;
+    font-size: clamp(2rem, 9vw, 2.5rem);
+    line-height: 1.22;
+  }
+  #app .hero-desc {
+    margin-top: 12px;
+    font-size: 0.86rem;
+    line-height: 1.75;
+  }
+  #app .hero-actions {
+    gap: 8px;
+    margin-top: 16px;
+  }
+  #app .hero-stats {
+    gap: 14px;
+    margin-top: 20px;
+  }
+  #app .stat-item strong {
+    font-size: 1.35rem;
+  }
+  #app .hero-visual {
+    height: 300px;
+    margin-top: 2px;
+  }
+  #app .visual-blob {
+    width: 250px;
+    height: 250px;
+    top: 18px;
+  }
+  #app .visual-ring {
+    width: 220px;
+    height: 220px;
+    top: -10px;
+  }
+  #app .visual-sun {
+    width: 58px;
+    height: 58px;
+  }
+  #app .hero-photo {
+    width: 225px;
+    top: 42px;
+  }
+  #app .hero-photo img {
+    height: 150px;
+  }
+  #app .mood-note {
+    top: 2px;
+    left: 0;
+    transform: scale(0.9);
+    transform-origin: left top;
+  }
+  #app .profile-chip {
+    right: 0;
+    bottom: 2px;
+    transform: scale(0.82);
+    transform-origin: right bottom;
+  }
+  #app .profile-chip:hover {
+    transform: scale(0.82) translateY(-2px);
+  }
+  #app .category-strip {
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+  }
+  #app .category-pill {
+    gap: 8px;
+    padding: 12px 10px;
+    border-radius: 16px;
+  }
+  #app .category-icon {
+    width: 32px;
+    height: 32px;
+    font-size: 1rem;
+  }
+  #app .category-info strong {
+    font-size: 0.8rem;
+  }
+  #app .category-info small {
+    font-size: 0.6rem;
+  }
+  #app .category-arrow {
+    display: none;
+  }
+  #app .section {
+    margin-top: 44px;
+  }
+
+  /* Post list filters: keep chips on one swipeable row */
+  #app .filter-panel {
+    margin-top: 16px;
+    padding: 14px;
+    border-radius: 22px;
+  }
+  #app .filter-top {
+    gap: 8px;
+  }
+  #app .sort-switch button {
+    padding: 6px 11px;
+    font-size: 0.72rem;
+  }
+  #app .filter-row {
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+  #app .filter-label {
+    flex-basis: auto;
+    padding-top: 0;
+    font-size: 0.64rem;
+  }
+  #app .filter-options {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 3px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  #app .filter-options::-webkit-scrollbar {
+    display: none;
+  }
+  #app .filter-chip,
+  #app .tag-filter {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  #app .filter-chip {
+    padding: 5px 12px;
+    font-size: 0.72rem;
+  }
+  #app .tag-filter {
+    padding: 4px 9px;
+    font-size: 0.7rem;
+  }
+  #app .tags-row {
+    margin-top: 7px;
+    padding-top: 8px;
+  }
+  #app .results-head {
+    margin-top: 18px;
+  }
+
+  /* Article detail: compact header and a balanced metadata row */
+  #app .post-detail-page {
+    padding-top: 16px;
+  }
+  #app .breadcrumb {
+    font-size: 0.68rem;
+  }
+  #app .article-header {
+    padding: 0 2px;
+  }
+  #app .article-title {
+    margin-top: 12px;
+    font-size: clamp(1.7rem, 7.4vw, 2.15rem);
+    line-height: 1.3;
+  }
+  #app .article-summary {
+    margin-top: 12px;
+    font-size: 0.86rem;
+    line-height: 1.75;
+  }
+  #app .article-meta {
+    display: grid;
+    grid-template-columns: repeat(3, auto);
+    gap: 8px 14px;
+    margin-top: 18px;
+    text-align: center;
+  }
+  #app .author-mini {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
+  #app .meta-divider {
+    display: none;
+  }
+  #app .meta-item {
+    font-size: 0.66rem;
+  }
+  #app .article-layout {
+    margin-top: 20px;
+  }
+  #app .article-card {
+    padding: 20px 16px 24px;
+    border-radius: 22px;
+  }
+  #app .article-card .markdown-body {
+    font-size: 0.9rem;
+    line-height: 1.85;
+  }
+  #app .article-tags {
+    margin-top: 26px;
+    padding-top: 18px;
+  }
+  #app .article-actions {
+    gap: 8px;
+  }
+  #app .like-button,
+  #app .share-button {
+    padding: 9px 13px;
+    font-size: 0.72rem;
+  }
+  #app .author-box {
+    margin-top: 26px;
+    padding: 14px;
+  }
+  #app .author-box img {
+    width: 48px;
+    height: 48px;
+  }
+
+  /* Guestbook */
+  #app .guestbook-page {
+    padding-top: 16px;
+  }
+  #app .guestbook-form-card {
+    padding: 22px 18px 20px;
+    border-radius: 22px;
+  }
+  #app .guestbook-form-card h2 {
+    font-size: 1.2rem;
+  }
+  #app .guestbook-form {
+    gap: 12px;
+  }
+  #app .guestbook-form .textarea {
+    min-height: 96px;
+  }
+  #app .message-grid {
+    gap: 12px;
+  }
+  #app .message-note {
+    padding: 16px;
+    border-radius: 18px;
+  }
+  #app .message-wall {
+    margin-top: 26px;
+  }
+
+  /* Digital human: get the conversation closer to the stage */
+  #app .digital-human-page {
+    padding-top: 12px;
+  }
+  #app .dh-hero {
+    gap: 8px;
+    padding-bottom: 12px;
+  }
+  #app .dh-hero h1 {
+    margin-top: 3px;
+    font-size: 1.62rem;
+    line-height: 1.25;
+  }
+  #app .dh-hero-desc {
+    margin-top: 8px;
+    font-size: 0.82rem;
+    line-height: 1.65;
+  }
+  #app .dh-hero-tags {
+    gap: 6px;
+    margin-top: 10px;
+  }
+  #app .dh-hero-tags span {
+    padding: 5px 9px;
+    font-size: 0.62rem;
+  }
+  #app .dh-shell {
+    margin-top: 14px;
+    border-radius: 22px;
+  }
+  #app .dh-stage {
+    height: 46vh;
+    min-height: 320px;
+  }
+  #app .dh-chat {
+    min-height: 420px;
+  }
+  #app .messages {
+    max-height: 360px;
+  }
+  #app .chat-head {
+    padding: 14px 14px 8px;
+  }
+  #app .chat-head h2 {
+    font-size: 0.95rem;
+  }
+  #app .chat-eyebrow {
+    font-size: 0.52rem;
+  }
+  #app .character-switch {
+    padding: 0 14px 10px;
+  }
+  #app .messages {
+    padding: 4px 14px 12px;
+  }
+
+  /* General density */
+  #app .page-shell {
+    padding-top: 18px;
+    padding-bottom: 56px;
+  }
+  #app .section {
+    margin-top: 42px;
+  }
+  #app .section-head {
+    margin-bottom: 18px;
+  }
+  #app .section-title {
+    font-size: 1.4rem;
+  }
+}
