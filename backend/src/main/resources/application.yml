@@ -14,6 +14,10 @@ spring:
       write-dates-as-timestamps: false
   cache:
     type: redis
+  servlet:
+    multipart:
+      max-file-size: 6MB
+      max-request-size: 12MB
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
@@ -72,6 +76,9 @@ app:
     nickname: ${ADMIN_NICKNAME:月白}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+  upload:
+    image-dir: ${UPLOAD_IMAGE_DIR:./data/uploads}
+    url-prefix: ${UPLOAD_URL_PREFIX:/api/uploads}
   digital-human:
     audio-dir: ${DIGITAL_HUMAN_AUDIO_DIR:./data/digital-human/audio}
     motion-dir: ${DIGITAL_HUMAN_MOTION_DIR:./data/digital-human/motions}

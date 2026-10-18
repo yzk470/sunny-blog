@@ -1,4 +1,4 @@
-import { httpDelete, httpGet, httpPatch, httpPost, httpPut } from './http'
+import { httpDelete, httpGet, httpPatch, httpPost, httpPut, httpUpload } from './http'
 import type {
   AdminPost,
   AuthUser,
@@ -101,5 +101,8 @@ export const adminApi = {
   },
   updateSite(payload: SiteProfilePayload) {
     return httpPut<SiteProfile>('/admin/site', payload)
+  },
+  uploadImage(file: File) {
+    return httpUpload<{ url: string; name: string; size: number }>('/admin/uploads/image', file)
   },
 }

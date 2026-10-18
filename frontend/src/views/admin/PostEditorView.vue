@@ -16,6 +16,8 @@ const categories = ref<Category[]>([])
 const tags = ref<Tag[]>([])
 const loading = ref(true)
 const saving = ref<'draft' | 'publish' | null>(null)
+const uploadingCover = ref(false)
+const coverFileInput = ref<HTMLInputElement | null>(null)
 const loadError = ref('')
 const stats = ref<{ views: number; likes: number; comments: number; createdAt: string } | null>(null)
 
@@ -159,6 +161,23 @@ async function save(publish?: boolean) {
 
 function removeCover() {
   form.coverImage = ''
+}
+
+async function uploadCover(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  uploadingCover.value = true
+  try {
+    const result = await adminApi.uploadImage(file)
+    form.coverImage = result.url
+    toast.show('封面图片已上传 ☀', 'success')
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : '封面上传失败', 'error')
+  } finally {
+    uploadingCover.value = false
+    input.value = ''
+  }
 }
 
 onMounted(init)
@@ -332,7 +351,26 @@ watch(
           </div>
           <div class="cover-preview">
             <img :src="coverOf(form.coverImage)" alt="封面预览" />
-            <span class="cover-label">封面预览</span>
+            <span class="cover-label">{{ uploadingCover ? '上传中…' : '封面预览' }}</span>
+          </div>
+          <div class="cover-upload-row">
+            <input
+              ref="coverFileInput"
+              class="cover-file-input"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              @change="uploadCover"
+            />
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost cover-upload-btn"
+              :disabled="uploadingCover"
+              @click="coverFileInput?.click()"
+            >
+              <span v-if="uploadingCover" class="spinner small-spinner"></span>
+              {{ uploadingCover ? '上传中…' : '上传本地图片' }}
+            </button>
+            <span class="cover-upload-hint">JPG / PNG / WebP / GIF，最大 5MB</span>
           </div>
           <div class="cover-presets">
             <button
@@ -707,6 +745,27 @@ watch(
   margin-top: 8px;
   font-size: 0.68rem;
   padding: 8px 10px;
+}
+
+.cover-upload-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.cover-file-input {
+  display: none;
+}
+
+.cover-upload-btn {
+  white-space: nowrap;
+}
+
+.cover-upload-hint {
+  color: var(--ink-soft);
+  font-size: 0.56rem;
 }
 
 .meta-card {

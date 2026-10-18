@@ -8,6 +8,8 @@ import { coverOf } from '@/utils/constants'
 const toast = useToastStore()
 const loading = ref(true)
 const saving = ref(false)
+const uploadingAvatar = ref(false)
+const avatarFileInput = ref<HTMLInputElement | null>(null)
 
 const form = reactive({
   nickname: '',
@@ -68,6 +70,23 @@ async function save() {
 }
 
 onMounted(load)
+
+async function uploadAvatar(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  uploadingAvatar.value = true
+  try {
+    const result = await adminApi.uploadImage(file)
+    form.avatar = result.url
+    toast.show('头像图片已上传 ☀', 'success')
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : '头像上传失败', 'error')
+  } finally {
+    uploadingAvatar.value = false
+    input.value = ''
+  }
+}
 </script>
 
 <template>
@@ -114,6 +133,25 @@ onMounted(load)
                     使用默认头像
                   </button>
                   <span>建议使用正方形图片</span>
+                </div>
+                <div class="avatar-upload-row">
+                  <input
+                    ref="avatarFileInput"
+                    class="avatar-file-input"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    @change="uploadAvatar"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost"
+                    :disabled="uploadingAvatar"
+                    @click="avatarFileInput?.click()"
+                  >
+                    <span v-if="uploadingAvatar" class="spinner small-spinner"></span>
+                    {{ uploadingAvatar ? '上传中…' : '上传本地头像' }}
+                  </button>
+                  <span class="avatar-upload-hint">JPG / PNG / WebP / GIF，最大 5MB</span>
                 </div>
               </div>
             </div>
@@ -293,6 +331,22 @@ onMounted(load)
   gap: 10px;
   color: var(--ink-faint);
   font-size: 0.6rem;
+}
+
+.avatar-upload-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.avatar-file-input {
+  display: none;
+}
+
+.avatar-upload-hint {
+  color: var(--ink-faint);
+  font-size: 0.56rem;
 }
 
 .text-chip {

@@ -10,7 +10,7 @@
 
 ## ✨ 项目特色
 
-- **阳光感视觉**：乳白底色、淡蓝与淡粉渐变、手绘感 SVG 封面、云朵与太阳装饰，桌面端与移动端都做了适配。
+- **阳光感视觉**：乳白底色、淡蓝与淡粉渐变、手绘感 SVG 封面、云朵与太阳装饰，桌面端与移动端都做了适配；文章封面和站点头像支持在后台直接上传本地图片。
 - **完整前后台**：文章浏览、分类/标签筛选、搜索、归档、文章详情、评论、留言板、关于页；后台登录、数据概览、文章编辑、评论审核、留言回复、分类标签管理、站点资料维护。
 - **3D 数字人会客厅**：`/digital-human` 页面用 Three.js + WebGL 渲染 PMX 模型（爻光 / 镜流），支持角色切换、表情、眨眼、口型同步、文字对话、语音播报、会话历史，以及「结合当前文章聊天」。
 - **真正的缓存设计**：Redis 缓存文章详情、分类、标签、归档、站点资料和统计数据；文章阅读量先进入 Redis Hash，再定时批量回写数据库。
@@ -456,6 +456,7 @@ mvn spring-boot:run "-Dspring-boot.run.profiles=mysql"
 | GET/POST/PUT/DELETE | `/api/admin/categories...` | 分类管理 |
 | GET/POST/PUT/DELETE | `/api/admin/tags...` | 标签管理 |
 | GET/PUT | `/api/admin/site` | 站点资料维护 |
+| POST | `/api/admin/uploads/image` | 上传文章封面 / 站点头像（multipart，≤5MB） |
 
 完整参数与在线调试见 Swagger：<http://127.0.0.1:8090/swagger-ui.html>
 
@@ -587,7 +588,7 @@ curl https://api.deepseek.com/v1/chat/completions `
 5. 使用 Nginx / Caddy 托管 `frontend/dist`，反向代理 `/api` 到后端；
 6. 开启 HTTPS，增加接口限流、评论验证码与敏感词过滤；
 7. 配置 MySQL 与 Redis 的定期备份；
-8. 如需上传封面，建议接入对象存储而不是直接存本地。
+8. 封面上传默认保存在 `backend/data/uploads`，由 `/api/uploads/**` 提供访问；生产环境请使用持久盘或对象存储，并备份该目录。
 
 ## 📄 License
 

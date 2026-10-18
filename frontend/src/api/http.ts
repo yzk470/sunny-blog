@@ -73,6 +73,29 @@ export function httpPostLong<T>(url: string, data?: unknown, timeout = 180000): 
   return request<T>({ url, method: 'POST', data, timeout })
 }
 
+export function httpUpload<T>(url: string, file: File): Promise<T> {
+  const form = new FormData()
+  form.append('file', file)
+  const token = localStorage.getItem(TOKEN_KEY)
+  return fetch(`/api${url}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  })
+    .then(async (response) => {
+      const body = (await response.json().catch(() => null)) as ApiResponse<T> | null
+      if (!response.ok || !body || body.code !== 0) {
+        if (response.status === 401) {
+          localStorage.removeItem(TOKEN_KEY)
+          localStorage.removeItem(USER_KEY)
+          window.dispatchEvent(new CustomEvent('sunny:auth-expired'))
+        }
+        throw new ApiError(body?.message || `上传失败（HTTP ${response.status}）`, response.status)
+      }
+      return body.data
+    })
+}
+
 export function httpPut<T>(url: string, data?: unknown): Promise<T> {
   return request<T>({ url, method: 'PUT', data })
 }
