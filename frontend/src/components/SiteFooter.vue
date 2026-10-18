@@ -2,8 +2,10 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useSiteStore } from '@/stores/site'
+import { useThemeStore } from '@/stores/theme'
 
 const site = useSiteStore()
+const theme = useThemeStore()
 const profile = computed(() => site.profile)
 const year = new Date().getFullYear()
 </script>
@@ -23,7 +25,7 @@ const year = new Date().getFullYear()
         <div class="footer-stamp">
           <span>EST. 2025</span>
           <span class="stamp-dot"></span>
-          <span>MADE WITH SUNSHINE</span>
+          <span>{{ theme.isDark ? 'MADE WITH MOONLIGHT' : 'MADE WITH SUNSHINE' }}</span>
         </div>
       </div>
 
@@ -49,7 +51,8 @@ const year = new Date().getFullYear()
       <div class="footer-note">
         <div class="note-card">
           <span class="note-sun">☀</span>
-          <p>今天也要记得，<br />给自己留一点晒太阳的时间。</p>
+          <p v-if="theme.isDark">今天也要记得，<br />给自己留一点看月亮的时间。</p>
+          <p v-else>今天也要记得，<br />给自己留一点晒太阳的时间。</p>
         </div>
       </div>
     </div>

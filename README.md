@@ -416,6 +416,9 @@ mvn spring-boot:run "-Dspring-boot.run.profiles=mysql"
 | `DIGITAL_HUMAN_MOTION_DIR` | `./data/digital-human/motions` | 混元 FBX 存放目录 |
 | `HUNYUAN_MOTION_API_KEY` | 空 | 混元 TokenHub API Key（待配置） |
 | `HUNYUAN_MOTION_MODEL` | `hy-3d-motion` | 混元文生动作模型 |
+| `MCP_ENABLED` | `true` | 是否启用 MCP 文章管理接口 |
+| `MCP_API_KEY` | 空 | MCP 独立 Bearer Token，生产必须设置 |
+| `SITE_URL` | `https://www.bluish-white.top` | MCP 返回的文章链接前缀 |
 
 > 管理员账号只会在数据库中不存在时创建；修改 `ADMIN_PASSWORD` 不会覆盖已有密码。
 
@@ -457,6 +460,7 @@ mvn spring-boot:run "-Dspring-boot.run.profiles=mysql"
 | GET/POST/PUT/DELETE | `/api/admin/tags...` | 标签管理 |
 | GET/PUT | `/api/admin/site` | 站点资料维护 |
 | POST | `/api/admin/uploads/image` | 上传文章封面 / 站点头像（multipart，≤5MB） |
+| POST | `/api/mcp` | MCP Streamable HTTP（文章管理工具） |
 
 完整参数与在线调试见 Swagger：<http://127.0.0.1:8090/swagger-ui.html>
 
@@ -578,6 +582,65 @@ curl https://api.deepseek.com/v1/chat/completions `
 ### 数字人没有声音
 
 检查后端日志中的 `DigitalHumanTtsService` 与 `ALIYUN_TTS_API_KEY`。语音失败时只保留文字，不再退回浏览器朗读；浏览器拦截自动播放时，点击消息下方的「语音」按钮即可。
+
+## 🤖 MCP 文章管理
+
+后端提供 MCP Streamable HTTP 服务，AI 可以通过工具创建、读取、修改、发布文章，不需要管理员密码。
+
+```text
+端点：https://www.bluish-white.top/api/mcp
+认证：Authorization: Bearer <MCP_API_KEY>
+```
+
+支持的工具：
+
+| 工具 | 作用 |
+| --- | --- |
+| `list_articles` | 按状态/关键词列出文章 |
+| `get_article` | 按 id 或 slug 读取完整正文 |
+| `list_taxonomy` | 列出分类和标签 |
+| `create_article` | 创建文章，默认草稿，可指定发布 |
+| `update_article` | 局部修改文章 |
+| `publish_article` | 发布 / 撤回 |
+| `delete_article` | 删除文章（必须 `confirm=true`） |
+
+### 客户端配置
+
+支持 `url` 远程 MCP 的客户端：
+
+```json
+{
+  "mcpServers": {
+    "yuebai-blog": {
+      "url": "https://www.bluish-white.top/api/mcp",
+      "headers": {
+        "Authorization": "Bearer <MCP_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+只支持 stdio 的客户端可以用 `mcp-remote` 桥接：
+
+```json
+{
+  "mcpServers": {
+    "yuebai-blog": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://www.bluish-white.top/api/mcp",
+        "--header",
+        "Authorization: Bearer <MCP_API_KEY>"
+      ]
+    }
+  }
+}
+```
+
+`MCP_API_KEY` 只保存在本地配置和服务器 `/opt/sunny-blog/.env`，不要提交到 Git。该 Key 拥有文章写权限，泄露后立即更换。
 
 ## 🛡 生产部署建议
 

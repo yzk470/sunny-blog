@@ -5,6 +5,20 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#FFFCF5" />
+    <script>
+      ;(() => {
+        try {
+          const saved = localStorage.getItem('sunny-theme')
+          const dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
+          if (dark && !location.pathname.startsWith('/admin')) {
+            document.documentElement.dataset.theme = 'dark'
+            document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#0f172a')
+          }
+        } catch {
+          /* keep the default light theme */
+        }
+      })()
+    </script>
     <meta name="description" content="月白小筑 · 一个关于生活、代码与远方的阳光博客。" />
     <title>月白小筑 · 把日子过成一首明亮的诗</title>
   </head>

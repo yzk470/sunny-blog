@@ -5,10 +5,12 @@ import PostCard from '@/components/PostCard.vue'
 import { blogApi } from '@/api/blog'
 import type { Category, PostSummary, Tag } from '@/api/types'
 import { useSiteStore } from '@/stores/site'
+import { useThemeStore } from '@/stores/theme'
 import { categoryEmoji, coverOf } from '@/utils/constants'
 import { formatNumber, greeting, todayLabel } from '@/utils/format'
 
 const site = useSiteStore()
+const theme = useThemeStore()
 
 const latest = ref<PostSummary[]>([])
 const categories = ref<Category[]>([])
@@ -53,7 +55,7 @@ onMounted(async () => {
         <div class="hero-copy fade-up">
           <p class="hero-eyebrow">
             <span class="eyebrow-dot"></span>
-            HELLO, SUNNY DAY
+            {{ theme.isDark ? 'HELLO, MOONLIGHT' : 'HELLO, SUNNY DAY' }}
             <span class="eyebrow-date">{{ todayLabel() }}</span>
           </p>
           <h1 class="hero-title">
@@ -150,8 +152,10 @@ onMounted(async () => {
         <div class="home-posts">
           <div class="section-head">
             <div>
-              <p class="section-eyebrow">FRESH FROM THE SUN</p>
-              <h2 class="section-title"><span class="sun-dot"></span>最近写下的</h2>
+              <p class="section-eyebrow">{{ theme.isDark ? 'FRESH FROM THE MOON' : 'FRESH FROM THE SUN' }}</p>
+              <h2 class="section-title">
+                <span class="sun-dot" :class="{ moon: theme.isDark }"></span>最近写下的
+              </h2>
             </div>
             <RouterLink to="/posts" class="section-link">全部文章 →</RouterLink>
           </div>

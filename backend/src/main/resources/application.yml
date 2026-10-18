@@ -79,6 +79,10 @@ app:
   upload:
     image-dir: ${UPLOAD_IMAGE_DIR:./data/uploads}
     url-prefix: ${UPLOAD_URL_PREFIX:/api/uploads}
+  mcp:
+    enabled: ${MCP_ENABLED:true}
+    api-key: ${MCP_API_KEY:}
+    public-site-url: ${SITE_URL:https://www.bluish-white.top}
   digital-human:
     audio-dir: ${DIGITAL_HUMAN_AUDIO_DIR:./data/digital-human/audio}
     motion-dir: ${DIGITAL_HUMAN_MOTION_DIR:./data/digital-human/motions}

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-withDefaults(
+import { computed } from 'vue'
+import { useThemeStore } from '@/stores/theme'
+
+const props = withDefaults(
   defineProps<{
     eyebrow?: string
     title: string
@@ -12,6 +15,11 @@ withDefaults(
     compact: false,
   },
 )
+
+const theme = useThemeStore()
+const displayEyebrow = computed(() =>
+  theme.isDark ? props.eyebrow.replace(/SUNNY/gi, 'MOONLIT') : props.eyebrow,
+)
 </script>
 
 <template>
@@ -19,8 +27,8 @@ withDefaults(
     <div class="banner-inner">
       <div class="banner-copy">
         <p v-if="eyebrow" class="banner-eyebrow">
-          <span class="eyebrow-sun">☀</span>
-          {{ eyebrow }}
+          <span class="eyebrow-sun">{{ theme.isDark ? '☾' : '☀' }}</span>
+          {{ displayEyebrow }}
         </p>
         <h1 class="banner-title">{{ title }}</h1>
         <p v-if="description" class="banner-description">{{ description }}</p>

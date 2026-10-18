@@ -1,8 +1,19 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, watch } from 'vue'
 import { RouterView } from 'vue-router'
 import SiteHeader from '@/components/SiteHeader.vue'
 import SiteFooter from '@/components/SiteFooter.vue'
 import SunnyDecor from '@/components/SunnyDecor.vue'
+import { useThemeStore } from '@/stores/theme'
+
+const theme = useThemeStore()
+
+onMounted(() => theme.apply())
+watch(
+  () => theme.mode,
+  () => theme.apply(),
+)
+onUnmounted(() => theme.clear())
 </script>
 
 <template>

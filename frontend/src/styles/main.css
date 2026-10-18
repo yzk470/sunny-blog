@@ -7,6 +7,11 @@
   --bg-soft: #fff7ec;
   --surface: #ffffff;
   --surface-soft: #fffdf9;
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --surface-raised: #ffffff;
+  --header-glass: rgba(255, 252, 245, 0.82);
+  --nav-hover: rgba(255, 255, 255, 0.62);
+  --nav-active-bg: rgba(234, 246, 254, 0.9);
   --ink: #414754;
   --ink-soft: #727b8b;
   --ink-faint: #9aa2af;

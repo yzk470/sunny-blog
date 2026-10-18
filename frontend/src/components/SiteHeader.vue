@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+import { useThemeStore } from '@/stores/theme'
 
 const route = useRoute()
+const theme = useThemeStore()
 const scrolled = ref(false)
 const menuOpen = ref(false)
 
@@ -73,9 +75,20 @@ watch(
       </nav>
 
       <div class="header-actions">
+        <button
+          type="button"
+          class="theme-toggle"
+          :class="{ 'is-dark': theme.isDark }"
+          :aria-label="theme.isDark ? '切换到白天模式' : '切换到黑夜模式'"
+          :title="theme.isDark ? '切换到白天模式' : '切换到黑夜模式'"
+          @click="theme.toggle()"
+        >
+          <span class="theme-toggle-icon" aria-hidden="true">{{ theme.isDark ? '☾' : '☀' }}</span>
+          <span class="theme-toggle-text">{{ theme.isDark ? '黑夜' : '白天' }}</span>
+        </button>
         <span class="weather-pill">
-          <span class="weather-sun">☀</span>
-          今日晴朗
+          <span class="weather-sun" :class="{ moon: theme.isDark }">{{ theme.isDark ? '☾' : '☀' }}</span>
+          {{ theme.isDark ? '今夜有月' : '今日晴朗' }}
         </span>
         <RouterLink to="/admin" class="admin-entry" title="进入后台">
           <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
@@ -266,6 +279,45 @@ watch(
   flex: 0 0 auto;
 }
 
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-glass);
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.theme-toggle:hover {
+  transform: translateY(-1px);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.theme-toggle.is-dark {
+  background: rgba(30, 41, 59, 0.78);
+  border-color: rgba(191, 219, 254, 0.2);
+  color: #bfdbfe;
+}
+
+.theme-toggle-icon {
+  color: var(--butter-strong);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.theme-toggle.is-dark .theme-toggle-icon {
+  color: #bfdbfe;
+  text-shadow: 0 0 12px rgba(147, 197, 253, 0.65);
+}
+
 .weather-pill {
   display: inline-flex;
   align-items: center;
@@ -284,6 +336,12 @@ watch(
   color: #f6c96b;
   font-size: 0.9rem;
   animation: spin-slow 18s linear infinite;
+}
+
+.weather-sun.moon {
+  color: #bfdbfe;
+  animation: none;
+  text-shadow: 0 0 10px rgba(147, 197, 253, 0.6);
 }
 
 .admin-entry {
@@ -442,6 +500,18 @@ watch(
     height: 42px;
     justify-content: center;
     padding: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .theme-toggle-text {
+    display: none;
+  }
+  .theme-toggle {
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+    justify-content: center;
   }
 }
 

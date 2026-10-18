@@ -7,7 +7,7 @@ import { blogApi } from '@/api/blog'
 import type { PostDetail } from '@/api/types'
 import { useSiteStore } from '@/stores/site'
 import { useToastStore } from '@/stores/toast'
-import { categoryEmoji, coverOf } from '@/utils/constants'
+import { categoryEmoji } from '@/utils/constants'
 import { formatDate, formatNumber, initialOf, readingLabel } from '@/utils/format'
 import { extractHeadings, type HeadingItem } from '@/utils/markdown'
 
@@ -22,13 +22,11 @@ const liked = ref(false)
 const liking = ref(false)
 const headings = ref<HeadingItem[]>([])
 const activeHeading = ref('')
-const coverBroken = ref(false)
 
 let currentSlug = ''
 let observer: IntersectionObserver | null = null
 
 const profile = computed(() => site.profile)
-const cover = computed(() => (post.value ? coverOf(post.value.coverImage) : ''))
 const renderContent = computed(() => {
   const value = post.value?.content || ''
   const title = post.value?.title?.trim()
@@ -64,7 +62,6 @@ async function loadPost(slug: string) {
   if (!slug) return
   loading.value = true
   error.value = ''
-  coverBroken.value = false
   try {
     const result = await blogApi.detail(slug)
     if (currentSlug !== slug) return
@@ -159,7 +156,6 @@ onUnmounted(() => {
       <div v-if="loading" class="detail-loading">
         <div class="skeleton title-skeleton"></div>
         <div class="skeleton meta-skeleton"></div>
-        <div class="skeleton cover-skeleton"></div>
         <div class="skeleton body-skeleton"></div>
       </div>
 
@@ -209,14 +205,6 @@ onUnmounted(() => {
             <span class="meta-item">✎ {{ post.commentCount }} 条评论</span>
           </div>
         </header>
-
-        <figure v-if="!coverBroken" class="article-cover">
-          <img :src="cover" :alt="post.title" @error="coverBroken = true" />
-          <figcaption>
-            <span>☀ {{ post.category?.name || '月白小筑' }}</span>
-            <span>{{ formatDate(post.publishedAt || post.createdAt) }}</span>
-          </figcaption>
-        </figure>
 
         <div class="article-layout">
           <article class="article-card card">
@@ -348,10 +336,6 @@ onUnmounted(() => {
   width: 46%;
   margin: 0 auto;
 }
-.cover-skeleton {
-  height: 400px;
-  margin-top: 18px;
-}
 .body-skeleton {
   height: 340px;
 }
@@ -475,38 +459,6 @@ onUnmounted(() => {
   color: var(--ink-faint);
   font-size: 0.72rem;
   font-weight: 700;
-}
-
-/* Cover */
-.article-cover {
-  position: relative;
-  max-width: 1040px;
-  margin: 34px auto 0;
-  border-radius: var(--radius-xl);
-  overflow: hidden;
-  box-shadow: var(--shadow-md);
-  background: linear-gradient(135deg, #eaf6fe, #fff0f4);
-}
-
-.article-cover img {
-  width: 100%;
-  height: clamp(260px, 46vw, 520px);
-  object-fit: cover;
-}
-
-.article-cover figcaption {
-  position: absolute;
-  left: 20px;
-  right: 20px;
-  bottom: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  color: #fff;
-  font-size: 0.68rem;
-  font-weight: 800;
-  text-shadow: 0 1px 6px rgba(40, 60, 74, 0.28);
 }
 
 /* Layout */
@@ -848,10 +800,6 @@ onUnmounted(() => {
   }
   .meta-divider {
     display: none;
-  }
-  .article-cover {
-    border-radius: 22px;
-    margin-top: 24px;
   }
   .author-box {
     flex-wrap: wrap;
