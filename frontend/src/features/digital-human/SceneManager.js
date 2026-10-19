@@ -56,6 +56,9 @@ export class SceneManager {
         /** @type {MMDPhysics|null} — PMX skirt/hair/ribbon physics */
         this.physics = null;
         this._ammoPromise = null;
+        this._modelBaseScale = null;
+        this._modelBasePosition = null;
+        this._modelBaseQuaternion = null;
 
         // ---- Dynamic character paths (set from API) ----
         /** @type {Map<string, string>} characterCode → modelPath */
@@ -279,6 +282,9 @@ export class SceneManager {
             console.log('[SceneManager] No PMX rigid bodies; physics skipped');
             return;
         }
+        const baseScale = mesh.scale.clone();
+        const basePosition = mesh.position.clone();
+        const baseQuaternion = mesh.quaternion.clone();
         try {
             await this._loadAmmo();
             this.physics = new MMDPhysics(mesh, rigidBodies, data.constraints ?? [], {
@@ -288,9 +294,23 @@ export class SceneManager {
             this.physics.warmup(12);
             console.log(`[SceneManager] MMD physics ready: bodies=${rigidBodies.length}, constraints=${data.constraints?.length ?? 0}`);
         } catch (err) {
+            // MMDPhysics temporarily unsets mesh scale during initialization.
+            // Restore it if the second model's physics data is incomplete.
             this.physics = null;
+            mesh.scale.copy(baseScale);
+            mesh.position.copy(basePosition);
+            mesh.quaternion.copy(baseQuaternion);
+            mesh.updateMatrixWorld(true);
             console.warn('[SceneManager] MMD physics unavailable:', err.message);
         }
+    }
+
+    _restoreModelTransform(mesh) {
+        if (!mesh) return;
+        if (this._modelBaseScale) mesh.scale.copy(this._modelBaseScale);
+        if (this._modelBasePosition) mesh.position.copy(this._modelBasePosition);
+        if (this._modelBaseQuaternion) mesh.quaternion.copy(this._modelBaseQuaternion);
+        mesh.updateMatrixWorld(true);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -341,6 +361,10 @@ export class SceneManager {
             mesh.position.set(-center.x * scale, -bbox.min.y * scale, 0);
             console.log(`[SceneManager] Model positioned at (${mesh.position.x.toFixed(2)}, ${mesh.position.y.toFixed(2)}, ${mesh.position.z.toFixed(2)})`);
 
+            this._modelBaseScale = mesh.scale.clone();
+            this._modelBasePosition = mesh.position.clone();
+            this._modelBaseQuaternion = mesh.quaternion.clone();
+
             mesh.castShadow = true;
             mesh.receiveShadow = true;
             mesh.traverse((child) => {
@@ -367,6 +391,9 @@ export class SceneManager {
             // PMX rigid bodies drive skirts, ribbons and hair; wait for Ammo
             // once, then hand the bones back to the normal animation loop.
             await this._setupPhysics(mesh);
+            // MMDPhysics rescales the mesh internally; make the intended
+            // normalized transform authoritative before the first render.
+            this._restoreModelTransform(mesh);
 
             // Initialize expression engine
             this.expressionEngine = new ExpressionEngine(mesh, morphTargets);
@@ -443,6 +470,9 @@ export class SceneManager {
             this.physics = null;
             console.log('[SceneManager] MMD physics released');
         }
+        this._modelBaseScale = null;
+        this._modelBasePosition = null;
+        this._modelBaseQuaternion = null;
 
         if (this.currentMesh) {
             this.modelLoader.unloadModel(this.currentMesh);
@@ -683,6 +713,9 @@ export class SceneManager {
 
     resumeIdleMotion() {
         if (this._fbxMixer || this._vmdMixer || this._idleVmdMixer) return;
+        // Never let an idle loop cut a gesture that is still playing.
+        if (this.motionEngine?.gesture) return;
+        if (this._gestureVmdMixer && this._gestureVmdActive) return;
         if (this._gestureVmdMixer) this.stopGestureVmd();
         const urls = this._idleVmdUrls?.length ? this._idleVmdUrls : (this._idleVmdUrl ? [this._idleVmdUrl] : []);
         if (!urls.length) return;
@@ -1260,6 +1293,8 @@ export class SceneManager {
                     // Clamp long tab-restore deltas so cloth does not explode.
                     this.physics.update(Math.min(delta, 1 / 30));
                 } catch (err) {
+                    this._restoreModelTransform(this.currentMesh);
+                    this.physics = null;
                     console.warn('[SceneManager] MMD physics update failed:', err.message);
                 }
             }

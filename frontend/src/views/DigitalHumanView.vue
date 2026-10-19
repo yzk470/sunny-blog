@@ -52,6 +52,11 @@ let initToken = 0
 let motionTimer: number | undefined
 let packMotionTimer: number | undefined
 let gestureRequest = 0
+let gestureBusy = false
+let gestureEpoch = 0
+type GestureOptions = { resumeIdle?: boolean; onComplete?: () => void }
+type QueuedGesture = { key: string; options: GestureOptions }
+let gestureQueue: QueuedGesture[] = []
 let hunyuanPollTimer: number | undefined
 let greetingTimer: number | undefined
 let speechEpoch = 0
@@ -453,21 +458,38 @@ function stopDance() {
   if (!retargetLoading.value) void sceneManager?.resumeIdleMotion?.()
 }
 
-async function playGesture(
-  key: string,
-  options: { resumeIdle?: boolean; onComplete?: () => void } = {},
-) {
-  const complete = () => {
-    window.clearTimeout(motionTimer)
-    activeMotion.value = ''
-    if (options.resumeIdle !== false) {
-      void sceneManager?.resumeIdleMotion?.()
-    }
-    options.onComplete?.()
-  }
+function playGesture(key: string, options: GestureOptions = {}) {
   if (!sceneReady.value || motionLoading.value) {
     options.onComplete?.()
     return
+  }
+  // Never cut a gesture in half: queue the next one and let the current
+  // animation finish its full timeline first.
+  if (gestureBusy) {
+    gestureQueue.push({ key, options })
+    return
+  }
+  void runGesture(key, options)
+}
+
+async function runGesture(key: string, options: GestureOptions) {
+  gestureBusy = true
+  const epoch = gestureEpoch
+  const complete = () => {
+    window.clearTimeout(motionTimer)
+    if (epoch !== gestureEpoch) {
+      options.onComplete?.()
+      return
+    }
+    activeMotion.value = ''
+    const next = gestureQueue.shift()
+    gestureBusy = false
+    if (next) {
+      void runGesture(next.key, next.options)
+    } else if (options.resumeIdle !== false) {
+      void sceneManager?.resumeIdleMotion?.()
+    }
+    options.onComplete?.()
   }
   window.clearTimeout(packMotionTimer)
   activePackMotion.value = ''
@@ -479,7 +501,7 @@ async function playGesture(
     try {
       const duration = await sceneManager?.playGestureVmd?.(vmdUrl)
       if (request !== gestureRequest || !duration) {
-        options.onComplete?.()
+        complete()
         return
       }
       activeMotion.value = key
@@ -491,19 +513,26 @@ async function playGesture(
     }
   }
   if (request !== gestureRequest) {
-    options.onComplete?.()
+    complete()
     return
   }
   const fallbackKey = key === 'salute' ? 'wave' : key
   const ok = sceneManager?.playGesture?.(fallbackKey)
   if (!ok) {
-    options.onComplete?.()
+    complete()
     return
   }
   activeMotion.value = key
   const gestureDuration = Number(sceneManager?.motionEngine?.gesture?.duration || 2.4)
   window.clearTimeout(motionTimer)
   motionTimer = window.setTimeout(complete, Math.max(1200, gestureDuration * 1000 + 220))
+}
+
+function resetGestureState() {
+  gestureEpoch += 1
+  gestureQueue = []
+  gestureBusy = false
+  window.clearTimeout(motionTimer)
 }
 
 async function playPackMotion(motion: { key: string; label: string; file: string; emotion?: string; disabled?: boolean }) {
@@ -733,6 +762,7 @@ async function initCharacter(code: string) {
   resetSpeechQueue()
   cancelActiveStream()
   stopDance()
+  resetGestureState()
   activeMotion.value = ''
   activePackMotion.value = ''
   retargetLoading.value = false
@@ -905,6 +935,9 @@ async function send() {
   let motionSequenceStarted = false
   let motionQueueRunning = false
   const motionQueue: string[] = []
+  // New user turn: drop actions queued for the previous reply, but let a
+  // currently playing gesture finish instead of cutting it off.
+  gestureQueue = []
 
   const runMotionQueue = async () => {
     if (motionQueueRunning || turn !== activeStreamTurn) return
@@ -920,7 +953,7 @@ async function send() {
           resolve()
         }
         void playGesture(motion, { resumeIdle: false, onComplete: finish })
-        window.setTimeout(finish, 6000)
+        window.setTimeout(finish, 15000)
       })
     }
     motionQueueRunning = false
@@ -1123,6 +1156,7 @@ onBeforeUnmount(() => {
   window.clearTimeout(motionTimer)
   window.clearTimeout(hunyuanPollTimer)
   window.clearTimeout(greetingTimer)
+  resetGestureState()
   cancelActiveStream()
   resetSpeechQueue()
   window.speechSynthesis?.cancel()
