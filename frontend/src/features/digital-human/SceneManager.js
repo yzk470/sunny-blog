@@ -59,6 +59,8 @@ export class SceneManager {
         this._modelBaseScale = null;
         this._modelBasePosition = null;
         this._modelBaseQuaternion = null;
+        this._physicsBoneNames = new Set();
+        this._physicsAccumulator = 0;
 
         // ---- Dynamic character paths (set from API) ----
         /** @type {Map<string, string>} characterCode → modelPath */
@@ -292,17 +294,42 @@ export class SceneManager {
                 maxStepNum: 2,
             });
             this.physics.warmup(12);
-            console.log(`[SceneManager] MMD physics ready: bodies=${rigidBodies.length}, constraints=${data.constraints?.length ?? 0}`);
+            this._physicsBoneNames = this._collectPhysicsBones(mesh, rigidBodies);
+            console.log(`[SceneManager] MMD physics ready: bodies=${rigidBodies.length}, constraints=${data.constraints?.length ?? 0}, dynamicBones=${this._physicsBoneNames.size}`);
         } catch (err) {
             // MMDPhysics temporarily unsets mesh scale during initialization.
             // Restore it if the second model's physics data is incomplete.
             this.physics = null;
+            this._physicsBoneNames = new Set();
             mesh.scale.copy(baseScale);
             mesh.position.copy(basePosition);
             mesh.quaternion.copy(baseQuaternion);
             mesh.updateMatrixWorld(true);
             console.warn('[SceneManager] MMD physics unavailable:', err.message);
         }
+    }
+
+    _collectPhysicsBones(mesh, rigidBodies) {
+        const names = new Set();
+        const bones = mesh.skeleton?.bones ?? [];
+        rigidBodies.forEach((body) => {
+            // Type 0 bodies are kinematic and still follow the bones. Types 1/2
+            // are simulated, so their bone tracks must not fight the solver.
+            if (body.type === 0 || body.boneIndex == null || body.boneIndex < 0) return;
+            const bone = bones[body.boneIndex];
+            if (bone?.name) names.add(bone.name);
+        });
+        return names;
+    }
+
+    _filterPhysicsTracks(clip) {
+        if (!clip?.tracks?.length || !this._physicsBoneNames?.size) return clip;
+        clip.tracks = clip.tracks.filter((track) => {
+            const dot = track.name.lastIndexOf('.');
+            const boneName = dot > 0 ? track.name.slice(0, dot) : track.name;
+            return !this._physicsBoneNames.has(boneName);
+        });
+        return clip;
     }
 
     _restoreModelTransform(mesh) {
@@ -473,6 +500,10 @@ export class SceneManager {
         this._modelBaseScale = null;
         this._modelBasePosition = null;
         this._modelBaseQuaternion = null;
+        this._physicsBoneNames = new Set();
+        this._physicsAccumulator = 0;
+        this._idleClipCache = null;
+        this._idleClipCacheUrl = '';
 
         if (this.currentMesh) {
             this.modelLoader.unloadModel(this.currentMesh);
@@ -551,11 +582,12 @@ export class SceneManager {
             if (lowerBodyBones.some((bone) => track.name.includes(bone))) return false;
             return true;
         });
+        this._filterPhysicsTracks(raw);
         raw.resetDuration();
         if (!raw.tracks.length || raw.duration <= 0) {
             throw new Error('VMD 动作没有可用的上半身轨道');
         }
-        const maxSeconds = Number(options.maxSeconds || 4.2);
+        const maxSeconds = Number(options.maxSeconds || 15);
         let clip = raw;
         if (clip.duration > maxSeconds) {
             const fps = 30;
@@ -655,6 +687,7 @@ export class SceneManager {
                 if (lowerBodyBones.some((bone) => track.name.includes(bone))) return false;
                 return true;
             });
+            this._filterPhysicsTracks(raw);
             raw.resetDuration();
             if (!raw.tracks.length || raw.duration <= 0) {
                 throw new Error('idle clip has no upper-body tracks');
@@ -905,6 +938,7 @@ export class SceneManager {
             if (lowerBodyBones.some((bone) => track.name.includes(bone))) return false;
             return true;
         });
+        this._filterPhysicsTracks(rawClip);
         rawClip.resetDuration();
 
         let clip = rawClip;
@@ -1290,11 +1324,20 @@ export class SceneManager {
             }
             if (this.physics) {
                 try {
-                    // Clamp long tab-restore deltas so cloth does not explode.
-                    this.physics.update(Math.min(delta, 1 / 30));
+                    // Fixed 60 Hz stepping is much more stable than feeding
+                    // a 120+ FPS render delta straight into Bullet.
+                    this._physicsAccumulator += Math.min(delta, 1 / 20);
+                    let steps = 0;
+                    while (this._physicsAccumulator >= 1 / 60 && steps < 2) {
+                        this.physics.update(1 / 60);
+                        this._physicsAccumulator -= 1 / 60;
+                        steps += 1;
+                    }
+                    if (steps === 2) this._physicsAccumulator = 0;
                 } catch (err) {
                     this._restoreModelTransform(this.currentMesh);
                     this.physics = null;
+                    this._physicsAccumulator = 0;
                     console.warn('[SceneManager] MMD physics update failed:', err.message);
                 }
             }

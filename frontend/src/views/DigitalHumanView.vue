@@ -954,7 +954,7 @@ async function send() {
           resolve()
         }
         void playGesture(motion, { resumeIdle: false, onComplete: finish })
-        window.setTimeout(finish, 15000)
+        window.setTimeout(finish, 20000)
       })
     }
     motionQueueRunning = false
