@@ -13,6 +13,7 @@ const navItems = [
   { label: '文章', to: '/posts' },
   { label: '归档', to: '/archives' },
   { label: '数字人', to: '/digital-human' },
+  { label: '狼人杀', to: '/werewolf' },
   { label: '关于', to: '/about' },
   { label: '留言板', to: '/guestbook' },
 ]
@@ -482,6 +483,17 @@ watch(
 @media (max-width: 980px) {
   .weather-pill {
     display: none;
+  }
+}
+
+@media (min-width: 821px) and (max-width: 1080px) {
+  .nav-link {
+    padding: 8px 9px;
+    font-size: 0.82rem;
+  }
+
+  .main-nav {
+    gap: 2px;
   }
 }
 

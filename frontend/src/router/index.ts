@@ -43,6 +43,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '3D 数字人会客厅' },
       },
       {
+        path: 'werewolf',
+        name: 'werewolf',
+        component: () => import('@/views/WerewolfView.vue'),
+        meta: { title: '狼人杀 · 月白小镇' },
+      },
+      {
         path: 'guestbook',
         name: 'guestbook',
         component: () => import('@/views/GuestbookView.vue'),
