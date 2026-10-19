@@ -284,16 +284,42 @@ export class SceneManager {
             console.log('[SceneManager] No PMX rigid bodies; physics skipped');
             return;
         }
+        // Bullet's PMX constraints are unstable for this asset: occasionally a
+        // hair chain gets a huge impulse and is launched off-screen. Keep the
+        // VMD hair/cloth tracks (they are not filtered while physics is off)
+        // and leave Bullet disabled by default. Add ?physics=1 locally only
+        // when deliberately debugging the solver.
+        if (new URLSearchParams(window.location.search).get('physics') !== '1') {
+            this._physicsBoneNames = new Set();
+            console.warn('[SceneManager] Bullet physics disabled; using VMD hair/cloth animation');
+            return;
+        }
+        // JINGLIU has 464 bodies / 736 constraints and exhausts the default
+        // Ammo heap, which then causes OOM for every later character too.
+        // Keep the stable model rather than corrupting the whole renderer.
+        if (rigidBodies.length > 420) {
+            this._physicsBoneNames = new Set();
+            console.warn(`[SceneManager] Physics skipped for heavy model (${rigidBodies.length} bodies) to avoid Ammo OOM`);
+            return;
+        }
         const baseScale = mesh.scale.clone();
         const basePosition = mesh.position.clone();
         const baseQuaternion = mesh.quaternion.clone();
+        const baseParent = mesh.parent;
         try {
             await this._loadAmmo();
             // Long hair chains are much lighter than the skirt and tend to
             // keep oscillating. Give only hair bodies extra damping; the skirt
             // keeps its original, softer material parameters.
             const tunedBodies = rigidBodies.map((body) => {
-                if (!/髪|髮|hair|尾/i.test(body.name ?? '')) return body;
+                const isHair = /髪|髮|hair|尾/i.test(body.name ?? '');
+                if (!isHair) {
+                    // Skirts, capes and sleeves are the parts that explode
+                    // intermittently under Bullet while the VMD already
+                    // animates them. Keep only hair simulated; the rest stay
+                    // kinematic and follow their bone animation.
+                    return body.type === 0 ? body : { ...body, type: 0 };
+                }
                 return {
                     ...body,
                     positionDamping: Math.max(body.positionDamping ?? 0.5, 0.9),
@@ -310,11 +336,15 @@ export class SceneManager {
         } catch (err) {
             // MMDPhysics temporarily unsets mesh scale during initialization.
             // Restore it if the second model's physics data is incomplete.
-            this.physics = null;
+            if (this.physics) this._disposePhysics();
+            else this.physics = null;
             this._physicsBoneNames = new Set();
             mesh.scale.copy(baseScale);
             mesh.position.copy(basePosition);
             mesh.quaternion.copy(baseQuaternion);
+            if (baseParent && mesh.parent !== baseParent) {
+                baseParent.add(mesh);
+            }
             mesh.updateMatrixWorld(true);
             console.warn('[SceneManager] MMD physics unavailable:', err.message);
         }
@@ -348,7 +378,71 @@ export class SceneManager {
         if (this._modelBaseScale) mesh.scale.copy(this._modelBaseScale);
         if (this._modelBasePosition) mesh.position.copy(this._modelBasePosition);
         if (this._modelBaseQuaternion) mesh.quaternion.copy(this._modelBaseQuaternion);
+        // Bullet temporarily detaches the mesh while simulating scaled models.
+        // If it throws in between, the old mesh would otherwise be orphaned and
+        // remain rendered after a character switch.
+        if (mesh.parent !== this.scene) {
+            this.scene.add(mesh);
+        }
         mesh.updateMatrixWorld(true);
+    }
+
+    _removeOrphanModels(except = null) {
+        for (const child of [...this.scene.children]) {
+            if (child === except || !child.userData?.isDigitalHumanModel) continue;
+            console.warn('[SceneManager] Removing orphaned character mesh from scene');
+            this.scene.remove(child);
+            try {
+                this.modelLoader.unloadModel(child);
+            } catch (err) {
+                console.warn('[SceneManager] Orphan mesh disposal warning:', err.message);
+            }
+        }
+    }
+
+    _enforceModelTransform() {
+        const mesh = this.currentMesh;
+        if (!mesh || !this._modelBaseScale) return;
+        const scaleOk = mesh.scale.distanceToSquared(this._modelBaseScale) < 1e-8;
+        const posOk = !this._modelBasePosition || mesh.position.distanceToSquared(this._modelBasePosition) < 1e-8;
+        if (!scaleOk || !posOk) {
+            this._restoreModelTransform(mesh);
+        }
+    }
+
+    _disposePhysics() {
+        const physics = this.physics;
+        this.physics = null;
+        this._physicsAccumulator = 0;
+        if (!physics) return;
+        const Ammo = window.Ammo;
+        try {
+            for (const item of physics.constraints ?? []) {
+                const constraint = item?.constraint;
+                if (!constraint) continue;
+                physics.world?.removeConstraint(constraint);
+                if (Ammo?.destroy) Ammo.destroy(constraint);
+            }
+            for (const item of physics.bodies ?? []) {
+                const body = item?.body;
+                if (!body) continue;
+                physics.world?.removeRigidBody(body);
+                if (!Ammo?.destroy) continue;
+                const shape = body.getCollisionShape?.();
+                const state = body.getMotionState?.();
+                if (shape) Ammo.destroy(shape);
+                if (state) Ammo.destroy(state);
+                Ammo.destroy(body);
+            }
+            if (physics.world && Ammo?.destroy) Ammo.destroy(physics.world);
+        } catch (err) {
+            console.warn('[SceneManager] MMD physics disposal warning:', err.message);
+        } finally {
+            physics.bodies = [];
+            physics.constraints = [];
+            physics.world = null;
+        }
+        console.log('[SceneManager] MMD physics memory released');
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -423,6 +517,8 @@ export class SceneManager {
             console.log(`[SceneManager] Camera repositioned: (0, ${cameraY.toFixed(2)}, ${cameraDist.toFixed(2)})`);
 
             this.scene.add(mesh);
+            mesh.userData.isDigitalHumanModel = true;
+            this._removeOrphanModels(mesh);
             this.currentMesh = mesh;
             this.currentCharacter = characterType;
 
@@ -505,7 +601,7 @@ export class SceneManager {
         this.expressionEngine = null;
 
         if (this.physics) {
-            this.physics = null;
+            this._disposePhysics();
             console.log('[SceneManager] MMD physics released');
         }
         this._modelBaseScale = null;
@@ -517,6 +613,9 @@ export class SceneManager {
         this._idleClipCacheUrl = '';
 
         if (this.currentMesh) {
+            // Bullet may have detached the mesh during an interrupted physics
+            // step. Remove it explicitly so the old character cannot linger.
+            this.scene.remove(this.currentMesh);
             this.modelLoader.unloadModel(this.currentMesh);
             this.currentMesh = null;
             console.log('[SceneManager] Current mesh unloaded');
@@ -613,6 +712,7 @@ export class SceneManager {
         this._gestureVmdAction = this._gestureVmdMixer.clipAction(clip);
         this._gestureVmdAction.setLoop(THREE.LoopOnce, 1);
         this._gestureVmdAction.clampWhenFinished = true;
+        this._gestureVmdAction.fadeIn(0.25);
         this._gestureVmdAction.play();
         this._gestureVmdActive = true;
         if (this.motionEngine) this.motionEngine.enabled = false;
@@ -715,6 +815,7 @@ export class SceneManager {
         this._idleVmdAction = this._idleVmdMixer.clipAction(clip);
         this._idleVmdAction.setLoop(THREE.LoopRepeat, Infinity);
         this._idleVmdAction.clampWhenFinished = false;
+        this._idleVmdAction.fadeIn(0.4);
         this._idleVmdAction.play();
         this._idleVmdActive = true;
         this._idleVmdUrl = url;
@@ -967,6 +1068,7 @@ export class SceneManager {
         this._vmdAction = this._vmdMixer.clipAction(clip);
         this._vmdAction.setLoop(THREE.LoopRepeat, Infinity);
         this._vmdAction.clampWhenFinished = false;
+        this._vmdAction.fadeIn(0.25);
         this._vmdAction.play();
         this._vmdActive = true;
         this._vmdElapsed = 0;
@@ -1352,6 +1454,7 @@ export class SceneManager {
                     console.warn('[SceneManager] MMD physics update failed:', err.message);
                 }
             }
+            this._enforceModelTransform();
 
             // Render
             this.renderer.render(this.scene, this.camera);
