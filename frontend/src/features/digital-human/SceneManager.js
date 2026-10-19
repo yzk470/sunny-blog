@@ -289,13 +289,24 @@ export class SceneManager {
         const baseQuaternion = mesh.quaternion.clone();
         try {
             await this._loadAmmo();
-            this.physics = new MMDPhysics(mesh, rigidBodies, data.constraints ?? [], {
+            // Long hair chains are much lighter than the skirt and tend to
+            // keep oscillating. Give only hair bodies extra damping; the skirt
+            // keeps its original, softer material parameters.
+            const tunedBodies = rigidBodies.map((body) => {
+                if (!/髪|髮|hair|尾/i.test(body.name ?? '')) return body;
+                return {
+                    ...body,
+                    positionDamping: Math.max(body.positionDamping ?? 0.5, 0.9),
+                    rotationDamping: Math.max(body.rotationDamping ?? 0.5, 0.92),
+                };
+            });
+            this.physics = new MMDPhysics(mesh, tunedBodies, data.constraints ?? [], {
                 gravity: new THREE.Vector3(0, -9.8 * 10, 0),
                 maxStepNum: 2,
             });
-            this.physics.warmup(12);
-            this._physicsBoneNames = this._collectPhysicsBones(mesh, rigidBodies);
-            console.log(`[SceneManager] MMD physics ready: bodies=${rigidBodies.length}, constraints=${data.constraints?.length ?? 0}, dynamicBones=${this._physicsBoneNames.size}`);
+            this.physics.warmup(30);
+            this._physicsBoneNames = this._collectPhysicsBones(mesh, tunedBodies);
+            console.log(`[SceneManager] MMD physics ready: bodies=${tunedBodies.length}, constraints=${data.constraints?.length ?? 0}, dynamicBones=${this._physicsBoneNames.size}`);
         } catch (err) {
             // MMDPhysics temporarily unsets mesh scale during initialization.
             // Restore it if the second model's physics data is incomplete.

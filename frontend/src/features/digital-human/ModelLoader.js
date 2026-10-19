@@ -173,41 +173,54 @@ export class ModelLoader {
 
         console.log('[ModelLoader] unloadModel() — starting disposal');
 
-        // Dispose geometry
-        if (mesh.geometry) {
-            mesh.geometry.dispose();
-            console.log('[ModelLoader] Geometry disposed');
-        }
-
-        // Dispose materials and their textures
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        materials.forEach((mat, i) => {
-            if (!mat) return;
-
-            // Walk known texture properties
-            const textureProps = [
-                'map', 'lightMap', 'bumpMap', 'normalMap', 'specularMap',
-                'envMap', 'alphaMap', 'aoMap', 'displacementMap',
-                'emissiveMap', 'metalnessMap', 'roughnessMap',
-                'gradientMap', 'sphereMap',
-            ];
-
-            textureProps.forEach((prop) => {
-                const tex = mat[prop];
-                if (tex && tex.isTexture) {
-                    tex.dispose();
-                }
-            });
-
-            mat.dispose();
-        });
-        console.log(`[ModelLoader] ${materials.length} material(s) disposed`);
-
-        // Clear parent reference
+        // Remove the whole hierarchy first so no child mesh/material can keep
+        // rendering (or keep a texture alive) while the next character loads.
         if (mesh.parent) {
             mesh.parent.remove(mesh);
         }
 
+        const geometries = new Set();
+        const materials = new Set();
+        const textures = new Set();
+        const disposeMaterial = (mat) => {
+            if (!mat || materials.has(mat)) return;
+            materials.add(mat);
+            const textureProps = [
+                'map', 'lightMap', 'bumpMap', 'normalMap', 'specularMap',
+                'envMap', 'alphaMap', 'aoMap', 'displacementMap',
+                'emissiveMap', 'metalnessMap', 'roughnessMap',
+                'gradientMap', 'sphereMap', 'matcap',
+            ];
+            textureProps.forEach((prop) => {
+                const tex = mat[prop];
+                if (tex && tex.isTexture && !textures.has(tex)) {
+                    textures.add(tex);
+                    tex.dispose();
+                }
+            });
+            mat.dispose();
+        };
+
+        // MMDLoader meshes can have child meshes with their own materials.
+        // Disposing only the root material leaves the previous character's
+        // textures resident, which can show up as ghost/leftover textures.
+        mesh.traverse((child) => {
+            if (!child.isMesh && !child.isSkinnedMesh) return;
+            if (child.geometry && !geometries.has(child.geometry)) {
+                geometries.add(child.geometry);
+                child.geometry.dispose();
+            }
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach(disposeMaterial);
+        });
+        if (!geometries.has(mesh.geometry)) {
+            mesh.geometry?.dispose();
+        }
+        if (mesh.skeleton?.dispose) {
+            mesh.skeleton.dispose();
+        }
+
+        console.log(`[ModelLoader] ${geometries.size} geometry/geometries and ${materials.size} material(s) disposed`);
         console.log('[ModelLoader] Model unloaded and fully disposed');
     }
 }
