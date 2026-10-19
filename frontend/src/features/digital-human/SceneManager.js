@@ -13,6 +13,7 @@
 
 import * as THREE from 'three';
 import { retargetClip } from 'three/addons/utils/SkeletonUtils.js';
+import { MMDPhysics } from 'three/addons/animation/MMDPhysics.js';
 import { ModelLoader } from './ModelLoader.js';
 import { ExpressionEngine } from './ExpressionEngine.js';
 import { MotionEngine } from './MotionEngine.js';
@@ -52,6 +53,9 @@ export class SceneManager {
         this.motionEngine = null;
         /** @type {LipSync|null} — audio-driven mouth animation */
         this.lipSync = null;
+        /** @type {MMDPhysics|null} — PMX skirt/hair/ribbon physics */
+        this.physics = null;
+        this._ammoPromise = null;
 
         // ---- Dynamic character paths (set from API) ----
         /** @type {Map<string, string>} characterCode → modelPath */
@@ -240,6 +244,55 @@ export class SceneManager {
         console.log('[SceneManager] Window resize listener bound');
     }
 
+    async _loadAmmo() {
+        if (window.Ammo && typeof window.Ammo !== 'function') {
+            return window.Ammo;
+        }
+        if (this._ammoPromise) {
+            return this._ammoPromise;
+        }
+        this._ammoPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = '/vendor/ammo/ammo.wasm.js';
+            script.async = true;
+            script.onload = async () => {
+                try {
+                    const factory = window.Ammo;
+                    const ammo = typeof factory === 'function' ? await factory() : factory;
+                    window.Ammo = ammo;
+                    console.log('[SceneManager] Ammo.js ready for MMD physics');
+                    resolve(ammo);
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            script.onerror = () => reject(new Error('Ammo.js 加载失败'));
+            document.head.appendChild(script);
+        });
+        return this._ammoPromise;
+    }
+
+    async _setupPhysics(mesh) {
+        const data = mesh.geometry?.userData?.MMD;
+        const rigidBodies = data?.rigidBodies ?? [];
+        if (!rigidBodies.length) {
+            console.log('[SceneManager] No PMX rigid bodies; physics skipped');
+            return;
+        }
+        try {
+            await this._loadAmmo();
+            this.physics = new MMDPhysics(mesh, rigidBodies, data.constraints ?? [], {
+                gravity: new THREE.Vector3(0, -9.8 * 10, 0),
+                maxStepNum: 2,
+            });
+            this.physics.warmup(12);
+            console.log(`[SceneManager] MMD physics ready: bodies=${rigidBodies.length}, constraints=${data.constraints?.length ?? 0}`);
+        } catch (err) {
+            this.physics = null;
+            console.warn('[SceneManager] MMD physics unavailable:', err.message);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Character loading
     // ═══════════════════════════════════════════════════════════════
@@ -263,6 +316,9 @@ export class SceneManager {
 
         try {
             const { mesh, bones, morphTargets } = await this.modelLoader.loadModel(path, onProgress);
+
+            const mmdData = mesh.geometry?.userData?.MMD;
+            console.log(`[SceneManager] MMD physics data: rigidBodies=${mmdData?.rigidBodies?.length ?? 0}, constraints=${mmdData?.constraints?.length ?? 0}`);
 
             console.log(`[SceneManager] Model loaded for "${characterType}" — computing bounding box...`);
 
@@ -307,6 +363,10 @@ export class SceneManager {
             this.scene.add(mesh);
             this.currentMesh = mesh;
             this.currentCharacter = characterType;
+
+            // PMX rigid bodies drive skirts, ribbons and hair; wait for Ammo
+            // once, then hand the bones back to the normal animation loop.
+            await this._setupPhysics(mesh);
 
             // Initialize expression engine
             this.expressionEngine = new ExpressionEngine(mesh, morphTargets);
@@ -378,6 +438,11 @@ export class SceneManager {
         }
 
         this.expressionEngine = null;
+
+        if (this.physics) {
+            this.physics = null;
+            console.log('[SceneManager] MMD physics released');
+        }
 
         if (this.currentMesh) {
             this.modelLoader.unloadModel(this.currentMesh);
@@ -1189,6 +1254,14 @@ export class SceneManager {
             }
             if (this.lipSync) {
                 this.lipSync.update(delta);
+            }
+            if (this.physics) {
+                try {
+                    // Clamp long tab-restore deltas so cloth does not explode.
+                    this.physics.update(Math.min(delta, 1 / 30));
+                } catch (err) {
+                    console.warn('[SceneManager] MMD physics update failed:', err.message);
+                }
             }
 
             // Render
