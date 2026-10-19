@@ -1,12 +1,14 @@
 package com.sunnyblog.werewolf;
 
 import com.sunnyblog.common.ApiResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequestMapping("/api/werewolf")
@@ -37,6 +40,20 @@ public class WerewolfController {
     @PostMapping("/games")
     public ApiResponse<WerewolfGame.GameView> create(@Valid @RequestBody CreateRequest request) {
         return ApiResponse.ok(service.create(request.playerName(), request.playerCount(), request.role()));
+    }
+
+    @GetMapping("/status")
+    public ApiResponse<WerewolfService.AiStatus> status() {
+        return ApiResponse.ok(service.aiStatus());
+    }
+
+    @PostMapping(value = "/games/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter stream(@PathVariable String id,
+                             @RequestBody WerewolfService.StreamRequest request,
+                             HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("X-Accel-Buffering", "no");
+        return service.stream(id, request);
     }
 
     @GetMapping("/games/{id}")

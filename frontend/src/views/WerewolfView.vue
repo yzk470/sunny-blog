@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import {
   werewolfApi,
   type WerewolfGame,
   type WerewolfLog,
   type WerewolfPlayer,
+  type WerewolfStreamPayload,
 } from '@/api/werewolf'
 import { useToastStore } from '@/stores/toast'
 
@@ -17,12 +18,26 @@ const setup = reactive({
 })
 const creating = ref(false)
 const busy = ref(false)
-const autoBusy = ref(false)
 const error = ref('')
 const game = ref<WerewolfGame | null>(null)
 const selectedTarget = ref('')
 const speech = ref('')
-const logRef = ref<HTMLElement | null>(null)
+const timelineRef = ref<HTMLElement | null>(null)
+const aiConfigured = ref(false)
+
+type StreamSpeech = {
+  speakerId: string
+  speakerName: string
+  seat: number
+  text: string
+}
+
+type TimelineEntry =
+  | { kind: 'divider'; key: string; label: string; sub: string }
+  | { kind: 'log'; key: string; log: WerewolfLog }
+
+const streamingSpeech = ref<StreamSpeech | null>(null)
+const thinking = ref('')
 
 const roleOptions = [
   { value: 'random', label: '随机身份', icon: '✦', hint: '把身份交给月白小镇的命运' },
@@ -44,10 +59,6 @@ const myPlayer = computed<WerewolfPlayer | null>(() => {
 
 const alivePlayers = computed(() => game.value?.players.filter((p) => p.alive) ?? [])
 const targetIds = computed(() => new Set(game.value?.waiting?.options.map((o) => o.id) ?? []))
-const selectedOption = computed(() =>
-  game.value?.waiting?.options.find((o) => o.id === selectedTarget.value) ?? null,
-)
-
 const phaseSteps = ['夜晚', '白天', '投票']
 const phaseStepIndex = computed(() => {
   const phase = game.value?.phase
@@ -78,19 +89,28 @@ const actionLabel = computed(() => {
   return '确认'
 })
 
-const logTypeLabel: Record<string, string> = {
-  system: '系统',
-  night: '夜晚',
-  dawn: '天亮',
-  death: '出局',
-  speech: '发言',
-  vote: '投票',
-  claim: '跳身份',
-  hunter: '猎人',
-  result: '结果',
-  role: '私密',
-  private: '私密',
-}
+const timeline = computed<TimelineEntry[]>(() => {
+  if (!game.value) return []
+  const entries: TimelineEntry[] = []
+  let segment = ''
+  for (const log of game.value.logs) {
+    if (log.round > 0) {
+      const night = log.phase.startsWith('NIGHT')
+      const key = `${log.round}-${night ? 'night' : 'day'}`
+      if (key !== segment) {
+        entries.push({
+          kind: 'divider',
+          key: `divider-${key}`,
+          label: `第 ${log.round} ${night ? '夜' : '日'}`,
+          sub: night ? 'NIGHT FALLS' : 'DAY BREAKS',
+        })
+        segment = key
+      }
+    }
+    entries.push({ kind: 'log', key: `log-${log.seq}`, log })
+  }
+  return entries
+})
 
 watch(
   () => setup.playerCount,
@@ -100,12 +120,25 @@ watch(
 )
 
 watch(
-  () => game.value?.logs.length,
+  () => [game.value?.logs.length, streamingSpeech.value?.text, thinking.value],
   async () => {
     await nextTick()
-    if (logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight
+    scrollBottom()
   },
 )
+
+onMounted(async () => {
+  try {
+    const status = await werewolfApi.status()
+    aiConfigured.value = status.configured
+  } catch {
+    aiConfigured.value = false
+  }
+})
+
+function scrollBottom() {
+  if (timelineRef.value) timelineRef.value.scrollTop = timelineRef.value.scrollHeight
+}
 
 function roleHint(value: string) {
   return roleOptions.find((role) => role.value === value)?.hint || ''
@@ -135,9 +168,7 @@ async function createGame(watchMode = false) {
       role: setup.role,
     })
     applyGame(created)
-    if (watchMode) {
-      await autoPlay()
-    }
+    await runStream(watchMode ? { action: 'AUTO' } : { action: 'ADVANCE' })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '开局失败，请稍后再试'
   } finally {
@@ -145,61 +176,70 @@ async function createGame(watchMode = false) {
   }
 }
 
-async function advance() {
-  if (!game.value || busy.value || autoBusy.value) return
-  if (game.value.waiting) {
+async function runStream(payload: WerewolfStreamPayload) {
+  if (!game.value || busy.value) return
+  busy.value = true
+  streamingSpeech.value = null
+  thinking.value = 'AI 正在整理这一轮的局势…'
+  const gameId = game.value.id
+  try {
+    await werewolfApi.stream(gameId, payload, {
+      onThinking(text) {
+        thinking.value = text || 'AI 正在整理这一轮的局势…'
+      },
+      onSpeechStart(data) {
+        streamingSpeech.value = { ...data, text: '' }
+      },
+      onToken(text) {
+        if (streamingSpeech.value) {
+          streamingSpeech.value = { ...streamingSpeech.value, text: streamingSpeech.value.text + text }
+        }
+      },
+      onSpeechEnd(text) {
+        if (streamingSpeech.value) streamingSpeech.value = { ...streamingSpeech.value, text }
+      },
+      onState(next) {
+        if (game.value?.id !== gameId) return
+        applyGame(next)
+        streamingSpeech.value = null
+        thinking.value = ''
+      },
+      onDone() {
+        thinking.value = ''
+      },
+    })
+  } catch (err) {
+    toast.show(err instanceof Error ? err.message : '本回合处理失败', 'error', 2800)
+  } finally {
+    busy.value = false
+    thinking.value = ''
+    streamingSpeech.value = null
+  }
+}
+
+function advance() {
+  if (game.value?.waiting) {
     toast.show('先完成当前行动，再继续推进', 'info', 2200)
     return
   }
-  busy.value = true
-  try {
-    applyGame(await werewolfApi.advance(game.value.id))
-  } catch (err) {
-    toast.show(err instanceof Error ? err.message : '推进失败', 'error', 2600)
-  } finally {
-    busy.value = false
-  }
+  void runStream({ action: 'ADVANCE' })
 }
 
-async function submitAction() {
-  if (!game.value?.waiting || !selectedTarget.value || busy.value) return
-  busy.value = true
-  try {
-    const waiting = game.value.waiting
-    applyGame(await werewolfApi.action(game.value.id, waiting.type, selectedTarget.value))
-  } catch (err) {
-    toast.show(err instanceof Error ? err.message : '行动失败', 'error', 2600)
-  } finally {
-    busy.value = false
-  }
+function submitAction() {
+  if (!game.value?.waiting || !selectedTarget.value) return
+  const waiting = game.value.waiting
+  void runStream({ action: 'ACTION', type: waiting.type, targetId: selectedTarget.value })
 }
 
-async function makeSpeech() {
+function makeSpeech() {
   const text = speech.value.trim()
-  if (!game.value || !text || busy.value) return
-  busy.value = true
-  try {
-    applyGame(await werewolfApi.action(game.value.id, 'SPEAK', undefined, text))
-    speech.value = ''
-    toast.show('发言已记录', 'success', 1800)
-  } catch (err) {
-    toast.show(err instanceof Error ? err.message : '发言失败', 'error', 2600)
-  } finally {
-    busy.value = false
-  }
+  if (!text || !game.value) return
+  speech.value = ''
+  void runStream({ action: 'SPEAK', text })
 }
 
-async function autoPlay() {
-  if (!game.value || autoBusy.value) return
-  autoBusy.value = true
-  try {
-    applyGame(await werewolfApi.auto(game.value.id))
-    toast.show('本局已自动演算完成', 'success', 2200)
-  } catch (err) {
-    toast.show(err instanceof Error ? err.message : '自动演算失败', 'error', 2600)
-  } finally {
-    autoBusy.value = false
-  }
+function autoPlay() {
+  void runStream({ action: 'AUTO' })
 }
 
 function selectTarget(id: string) {
@@ -213,6 +253,8 @@ function resetGame() {
   selectedTarget.value = ''
   speech.value = ''
   error.value = ''
+  streamingSpeech.value = null
+  thinking.value = ''
 }
 
 function isTargetable(player: WerewolfPlayer) {
@@ -230,15 +272,33 @@ function playerSubtitle(player: WerewolfPlayer) {
   return '身份未知'
 }
 
+function speechParts(log: WerewolfLog) {
+  const index = log.text.indexOf('：')
+  if (index <= 0) return { name: '', body: log.text }
+  return { name: log.text.slice(0, index), body: log.text.slice(index + 1) }
+}
+
+function isSpeech(log: WerewolfLog) {
+  return log.type === 'speech'
+}
+
+function isMySpeech(log: WerewolfLog) {
+  return speechParts(log).name === myPlayer.value?.name
+}
+
 function logIcon(log: WerewolfLog) {
   if (log.privateLog) return '🔒'
   if (log.type === 'vote') return '▣'
   if (log.type === 'death') return '☾'
-  if (log.type === 'speech') return '❝'
   if (log.type === 'claim') return '✦'
   if (log.type === 'hunter') return '🏹'
   if (log.type === 'result') return '★'
+  if (log.type === 'dawn') return '☀'
   return '·'
+}
+
+function eventClass(log: WerewolfLog) {
+  return [`type-${log.type}`, { private: log.privateLog }]
 }
 </script>
 
@@ -247,16 +307,16 @@ function logIcon(log: WerewolfLog) {
     <div class="container">
       <header class="ww-hero">
         <div class="ww-hero-copy">
-          <p class="section-eyebrow">WEREWOLF ARENA · MULTI-AGENT</p>
+          <p class="section-eyebrow">WEREWOLF ARENA · DEEPSEEK AGENTS</p>
           <h1>月白小镇的<br /><span>狼人杀之夜</span></h1>
           <p class="ww-hero-desc">
             八位身份不明的镇民，一场关于发言、投票和信任的博弈。
-            你可以亲自入局，也可以坐下来，看 AI 们把这一夜演完。
+            你可以亲自入局，也可以坐下来，看 DeepSeek 驱动的 AI 们把这一夜演完。
           </p>
           <div class="ww-hero-tags">
-            <span>多 Agent 决策</span>
+            <span>{{ aiConfigured ? 'DeepSeek 配音发言' : '本地 Agent 模式' }}</span>
             <span>人机对战</span>
-            <span>一键自动演算</span>
+            <span>流式对话</span>
           </div>
         </div>
         <div class="ww-hero-orbit" aria-hidden="true">
@@ -341,7 +401,7 @@ function logIcon(log: WerewolfLog) {
           </div>
           <div class="ww-mini-note">
             <span>☀</span>
-            <p>没想好怎么玩？直接开一局观战，先看 AI 们怎么互相试探。</p>
+            <p>没想好怎么玩？直接开一局观战，看 DeepSeek 和本地 Agent 一起把局演完。</p>
           </div>
         </aside>
       </section>
@@ -365,9 +425,12 @@ function logIcon(log: WerewolfLog) {
             </span>
           </div>
           <div class="ww-game-actions">
+            <span class="ww-ai-state" :class="{ on: aiConfigured }">
+              {{ aiConfigured ? 'DeepSeek 已接入' : '本地 Agent' }}
+            </span>
             <button type="button" class="ww-icon-btn" title="换个角色" @click="resetGame">＋ 新局</button>
-            <button type="button" class="ww-icon-btn" :disabled="autoBusy || game.over" title="自动演算" @click="autoPlay">
-              {{ autoBusy ? '演算中…' : '自动演算' }}
+            <button type="button" class="ww-icon-btn" :disabled="busy || game.over" title="自动演算" @click="autoPlay">
+              {{ busy ? '演算中…' : '自动演算' }}
             </button>
           </div>
         </div>
@@ -430,83 +493,105 @@ function logIcon(log: WerewolfLog) {
               </div>
             </div>
 
-            <div v-else-if="game.waiting" class="ww-action-card">
-              <div class="ww-action-top">
-                <span class="ww-action-kicker">YOUR MOVE · {{ game.waiting.type.replace('_', ' ') }}</span>
-                <span class="ww-action-round">R{{ game.round }}</span>
-              </div>
-              <h2>{{ game.waiting.title }}</h2>
-              <p>{{ game.waiting.prompt }}</p>
-              <div class="ww-options">
-                <button
-                  v-for="option in game.waiting.options"
-                  :key="option.id"
-                  type="button"
-                  class="ww-option"
-                  :class="{ active: selectedTarget === option.id, pass: option.id === 'pass' }"
-                  @click="selectedTarget = option.id"
-                >
-                  <span class="ww-option-mark">{{ selectedTarget === option.id ? '●' : '○' }}</span>
-                  {{ option.label }}
-                </button>
-              </div>
-              <button type="button" class="btn btn-primary ww-confirm" :disabled="busy || !selectedTarget" @click="submitAction">
-                <span v-if="busy" class="spinner small-spinner"></span>
-                {{ busy ? '记录中…' : actionLabel }}
-              </button>
-              <p class="ww-action-hint">只有你的选择会被提交；其他玩家会同时做出自己的判断。</p>
-            </div>
-
-            <div v-else class="ww-action-card ww-waiting-ai">
-              <span class="ww-thinking-orbit" aria-hidden="true">☾</span>
-              <p class="section-eyebrow">THE TOWN IS THINKING</p>
-              <h2>{{ game.phaseLabel }}</h2>
-              <p>{{ game.phaseHint }}</p>
-              <p v-if="!game.humanAlive" class="ww-dead-note">你已经出局，可以继续观战。</p>
-              <button type="button" class="btn btn-primary" :disabled="busy" @click="advance">
-                <span v-if="busy" class="spinner small-spinner"></span>
-                {{ busy ? '推进中…' : '推进一幕' }}
-              </button>
-            </div>
-
-            <div v-if="!game.over && game.phase === 'DISCUSSION' && game.humanAlive" class="ww-speech-card">
-              <div>
-                <p class="section-eyebrow">SAY SOMETHING</p>
-                <h3>轮到你发言</h3>
-                <p>不会改变数值，但会让其他 AI 记住你的态度。</p>
-              </div>
-              <div class="ww-speech-form">
-                <input v-model="speech" maxlength="160" placeholder="例如：我觉得 3 号昨晚太安静了。" @keyup.enter="makeSpeech" />
-                <button type="button" class="btn btn-sm btn-ghost" :disabled="busy || !speech.trim()" @click="makeSpeech">发言</button>
-              </div>
-            </div>
-
-            <section class="ww-log-card">
-              <div class="ww-log-head">
+            <div class="ww-dialogue">
+              <div class="ww-dialogue-head">
                 <div>
-                  <p class="section-eyebrow">NIGHT LOG</p>
-                  <h2>这一夜发生了什么</h2>
+                  <p class="section-eyebrow">THE NIGHT COUNCIL</p>
+                  <h2>这一夜的对话</h2>
                 </div>
-                <span class="ww-log-count">{{ game.logs.length }} 条记录</span>
+                <span>{{ game.summary }}</span>
               </div>
-              <div ref="logRef" class="ww-log">
-                <article
-                  v-for="log in game.logs"
-                  :key="log.seq"
-                  class="ww-log-item"
-                  :class="[`type-${log.type}`, { private: log.privateLog }]"
-                >
-                  <span class="ww-log-icon">{{ logIcon(log) }}</span>
-                  <div>
-                    <div class="ww-log-meta">
-                      <span>第 {{ log.round }} 轮 · {{ log.phaseLabel }}</span>
-                      <em>{{ logTypeLabel[log.type] || log.type }}</em>
-                    </div>
-                    <p>{{ log.text }}</p>
+
+              <div ref="timelineRef" class="ww-timeline">
+                <template v-for="entry in timeline" :key="entry.key">
+                  <div v-if="entry.kind === 'divider'" class="ww-divider">
+                    <span>{{ entry.label }}</span>
+                    <em>{{ entry.sub }}</em>
                   </div>
-                </article>
+                  <div
+                    v-else-if="isSpeech(entry.log)"
+                    class="ww-chat-row"
+                    :class="{
+                      mine: isMySpeech(entry.log),
+                      private: entry.log.privateLog,
+                      claim: entry.log.type === 'claim',
+                    }"
+                  >
+                    <span class="ww-chat-avatar">{{ speechParts(entry.log).name.slice(0, 1) }}</span>
+                    <div class="ww-chat-body">
+                      <div class="ww-chat-meta">
+                        <strong>{{ speechParts(entry.log).name }}</strong>
+                        <em>{{ entry.log.type === 'claim' ? '公开身份' : entry.log.phaseLabel }}</em>
+                      </div>
+                      <p class="ww-bubble">{{ speechParts(entry.log).body }}</p>
+                    </div>
+                  </div>
+                  <div v-else class="ww-event-row" :class="eventClass(entry.log)">
+                    <span class="ww-event-icon">{{ logIcon(entry.log) }}</span>
+                    <p><strong>{{ entry.log.phaseLabel }}</strong>{{ entry.log.text }}</p>
+                  </div>
+                </template>
+
+                <div v-if="streamingSpeech" class="ww-chat-row streaming">
+                  <span class="ww-chat-avatar">{{ streamingSpeech.speakerName.slice(0, 1) }}</span>
+                  <div class="ww-chat-body">
+                    <div class="ww-chat-meta">
+                      <strong>{{ streamingSpeech.speakerName }}</strong>
+                      <em>{{ aiConfigured ? 'DeepSeek 生成中' : 'Agent 生成中' }}</em>
+                    </div>
+                    <p class="ww-bubble">{{ streamingSpeech.text }}<span class="ww-cursor"></span></p>
+                  </div>
+                </div>
+
+                <div v-if="thinking && !streamingSpeech" class="ww-thinking">
+                  <span class="ww-thinking-dots"><i></i><i></i><i></i></span>
+                  {{ thinking }}
+                </div>
               </div>
-            </section>
+
+              <div v-if="!game.over" class="ww-composer">
+                <template v-if="game.waiting">
+                  <div class="ww-composer-head">
+                    <span>YOUR MOVE · {{ game.waiting.type.replace('_', ' ') }}</span>
+                    <strong>{{ game.waiting.title }}</strong>
+                  </div>
+                  <p class="ww-composer-prompt">{{ game.waiting.prompt }}</p>
+                  <div class="ww-options">
+                    <button
+                      v-for="option in game.waiting.options"
+                      :key="option.id"
+                      type="button"
+                      class="ww-option"
+                      :class="{ active: selectedTarget === option.id, pass: option.id === 'pass' }"
+                      @click="selectedTarget = option.id"
+                    >
+                      <span class="ww-option-mark">{{ selectedTarget === option.id ? '●' : '○' }}</span>
+                      {{ option.label }}
+                    </button>
+                  </div>
+                  <button type="button" class="btn btn-primary ww-confirm" :disabled="busy || !selectedTarget" @click="submitAction">
+                    <span v-if="busy" class="spinner small-spinner"></span>
+                    {{ busy ? '记录中…' : actionLabel }}
+                  </button>
+                </template>
+                <template v-else-if="game.phase === 'DISCUSSION' && game.humanAlive">
+                  <div class="ww-speech-form">
+                    <input v-model="speech" maxlength="160" placeholder="说点什么，让 AI 记住你的态度…" @keyup.enter="makeSpeech" />
+                    <button type="button" class="btn btn-ghost" :disabled="busy || !speech.trim()" @click="makeSpeech">发言</button>
+                  </div>
+                  <button type="button" class="btn btn-primary ww-continue-btn" :disabled="busy" @click="advance">
+                    {{ busy ? 'AI 思考中…' : '继续 · 进入投票' }}
+                  </button>
+                </template>
+                <template v-else>
+                  <p v-if="!game.humanAlive" class="ww-watch-note">你已经出局，可以继续看 AI 们把这一夜演完。</p>
+                  <button type="button" class="btn btn-primary ww-continue-btn" :disabled="busy" @click="advance">
+                    <span v-if="busy" class="spinner small-spinner"></span>
+                    {{ busy ? 'AI 思考中…' : '继续 · 让 AI 行动' }}
+                  </button>
+                </template>
+              </div>
+            </div>
           </main>
 
           <aside class="ww-side">
@@ -541,23 +626,17 @@ function logIcon(log: WerewolfLog) {
 
             <section class="ww-stat-card">
               <p class="section-eyebrow">TABLE STATE</p>
-              <div class="ww-stat-row">
-                <span>存活</span><strong>{{ game.summary.split('·')[0].trim() }}</strong>
-              </div>
-              <div class="ww-stat-row">
-                <span>狼人</span><strong>{{ game.summary.split('·')[1]?.trim() || '—' }}</strong>
-              </div>
-              <div class="ww-stat-row">
-                <span>好人</span><strong>{{ game.summary.split('·')[2]?.trim() || '—' }}</strong>
-              </div>
+              <div class="ww-stat-row"><span>存活</span><strong>{{ game.summary.split('·')[0].trim() }}</strong></div>
+              <div class="ww-stat-row"><span>狼人</span><strong>{{ game.summary.split('·')[1]?.trim() || '—' }}</strong></div>
+              <div class="ww-stat-row"><span>好人数</span><strong>{{ game.summary.split('·')[2]?.trim() || '—' }}</strong></div>
             </section>
 
             <section class="ww-side-controls">
               <button type="button" class="btn btn-ghost" @click="resetGame">☾ 重新开局</button>
-              <button type="button" class="btn btn-ghost" :disabled="autoBusy || game.over" @click="autoPlay">
-                {{ autoBusy ? '演算中…' : '✦ 自动演算完整局' }}
+              <button type="button" class="btn btn-ghost" :disabled="busy || game.over" @click="autoPlay">
+                {{ busy ? '演算中…' : '✦ 自动演算完整局' }}
               </button>
-              <p>AI 会保留自己的记忆、怀疑和投票倾向。你可以随时接管，也可以完全交给它们。</p>
+              <p>{{ aiConfigured ? 'AI 发言由 DeepSeek 生成，并逐字流式返回。' : '当前没有可用的模型 Key，AI 发言由本地 Agent 生成。' }}</p>
             </section>
           </aside>
         </div>
@@ -1063,6 +1142,189 @@ function logIcon(log: WerewolfLog) {
 .ww-side-controls { display: flex; flex-direction: column; gap: 7px; padding: 14px; }
 .ww-side-controls p { margin: 3px 2px 0; color: #98a6b5; font-size: 0.66rem; line-height: 1.6; }
 
+.ww-ai-state {
+  padding: 5px 8px;
+  border: 1px solid rgba(132, 158, 183, 0.18);
+  border-radius: 999px;
+  color: #8b9aaa;
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+.ww-ai-state.on { border-color: rgba(103, 181, 139, 0.34); color: #4d8a68; background: rgba(103, 181, 139, 0.08); }
+
+.ww-dialogue {
+  display: flex;
+  flex-direction: column;
+  min-height: 540px;
+  max-height: calc(100vh - 180px);
+  border: 1px solid rgba(133, 158, 183, 0.16);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 70% 0%, rgba(255, 227, 163, 0.08), transparent 34%),
+    rgba(255, 252, 246, 0.76);
+  box-shadow: 0 14px 38px rgba(74, 95, 116, 0.08);
+  overflow: hidden;
+}
+.ww-dialogue-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(132, 158, 183, 0.1);
+}
+.ww-dialogue-head h2 { margin: 5px 0 0; color: #2d4256; font-size: 1.15rem; }
+.ww-dialogue-head > span { padding-top: 8px; color: #9aa8b6; font-size: 0.66rem; text-align: right; }
+
+.ww-timeline {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 280px;
+  padding: 4px 18px 20px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scroll-behavior: smooth;
+}
+.ww-divider {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 20px 0 9px;
+  color: #9b6a2f;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+.ww-divider::before,
+.ww-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, transparent, rgba(155, 106, 47, 0.24));
+}
+.ww-divider::after { background: linear-gradient(90deg, rgba(155, 106, 47, 0.24), transparent); }
+.ww-divider span { white-space: nowrap; font-weight: 700; }
+.ww-divider em { color: #b2bdc8; font-size: 0.56rem; font-style: normal; letter-spacing: 0.16em; }
+
+.ww-chat-row { display: flex; gap: 8px; align-items: flex-start; margin: 5px 0; max-width: 92%; }
+.ww-chat-row.mine { align-self: flex-end; flex-direction: row-reverse; }
+.ww-chat-avatar {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  place-items: center;
+  border-radius: 9px;
+  background: linear-gradient(145deg, #203a58, #132438);
+  color: #f7e8c5;
+  font-size: 0.7rem;
+}
+.ww-chat-row.mine .ww-chat-avatar { background: linear-gradient(145deg, #c58b39, #9b6a2f); }
+.ww-chat-body { min-width: 0; }
+.ww-chat-meta { display: flex; align-items: baseline; gap: 6px; margin: 0 2px 3px; }
+.ww-chat-meta strong { color: #4a6074; font-size: 0.68rem; }
+.ww-chat-meta em { color: #a4b0bc; font-size: 0.58rem; font-style: normal; }
+.ww-chat-row.mine .ww-chat-meta { justify-content: flex-end; }
+.ww-bubble {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 4px 13px 13px 13px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #40566a;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  box-shadow: 0 3px 12px rgba(61, 82, 101, 0.05);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ww-chat-row.mine .ww-bubble {
+  border-radius: 13px 4px 13px 13px;
+  background: #1b3552;
+  color: #f3f7fb;
+}
+.ww-chat-row.private .ww-bubble { background: rgba(255, 243, 211, 0.92); color: #74572b; }
+.ww-chat-row.claim .ww-bubble { border: 1px solid rgba(197, 139, 57, 0.3); background: rgba(255, 246, 226, 0.94); color: #6f5128; }
+.ww-chat-row.streaming .ww-bubble { border: 1px dashed rgba(155, 106, 47, 0.35); background: rgba(255, 250, 238, 0.88); }
+.ww-cursor {
+  display: inline-block;
+  width: 5px;
+  height: 12px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: #9b6a2f;
+  animation: ww-blink 0.8s steps(2) infinite;
+}
+@keyframes ww-blink { 50% { opacity: 0; } }
+
+.ww-event-row {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin: 4px 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  color: #7b8ea2;
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+.ww-event-row p { margin: 0; }
+.ww-event-row p strong { margin-right: 6px; color: #97a5b3; font-size: 0.62rem; font-weight: 500; }
+.ww-event-icon { width: 14px; flex: 0 0 14px; color: #b5c0ca; text-align: center; }
+.ww-event-row.type-night,
+.ww-event-row.type-dawn { background: rgba(27, 53, 85, 0.045); }
+.ww-event-row.type-death p { color: #a45656; }
+.ww-event-row.type-vote p { color: #81602e; }
+.ww-event-row.type-result p { color: #8b5e24; font-weight: 600; }
+.ww-event-row.type-claim p { color: #7a5928; }
+.ww-event-row.type-hunter p { color: #8e5d3d; }
+.ww-event-row.private { background: rgba(255, 243, 211, 0.42); }
+
+.ww-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: #9b6a2f;
+  background: rgba(255, 246, 226, 0.55);
+  font-size: 0.7rem;
+}
+.ww-thinking-dots { display: inline-flex; gap: 3px; }
+.ww-thinking-dots i { width: 4px; height: 4px; border-radius: 50%; background: #c58b39; animation: ww-pulse 1s ease-in-out infinite; }
+.ww-thinking-dots i:nth-child(2) { animation-delay: 0.15s; }
+.ww-thinking-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes ww-pulse { 50% { opacity: 0.3; transform: translateY(-2px); } }
+
+.ww-composer {
+  padding: 14px 18px 17px;
+  border-top: 1px solid rgba(132, 158, 183, 0.12);
+  background: rgba(255, 252, 246, 0.92);
+}
+.ww-composer-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ww-composer-head span { color: #b07b3e; font-size: 0.6rem; letter-spacing: 0.1em; }
+.ww-composer-head strong { color: #2d4256; font-size: 0.9rem; }
+.ww-composer-prompt { margin: 6px 0 10px; color: #7b8ea2; font-size: 0.74rem; line-height: 1.6; }
+.ww-composer .ww-options { margin: 0 0 10px; }
+.ww-composer .ww-confirm { width: 100%; }
+.ww-continue-btn { width: 100%; margin-top: 8px; }
+.ww-speech-form { display: flex; gap: 7px; }
+.ww-speech-form input {
+  flex: 1;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(132, 158, 183, 0.22);
+  border-radius: 10px;
+  outline: none;
+  background: rgba(255, 255, 255, 0.85);
+  color: #2d4256;
+  font: inherit;
+  font-size: 0.78rem;
+}
+.ww-speech-form input:focus { border-color: rgba(155, 106, 47, 0.5); box-shadow: 0 0 0 3px rgba(240, 201, 123, 0.14); }
+.ww-watch-note { margin: 0 0 9px; color: #9b6a2f; font-size: 0.72rem; }
+
 @media (max-width: 1100px) {
   .ww-layout { grid-template-columns: 220px minmax(0, 1fr); }
   .ww-side { grid-column: 1 / -1; position: static; display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: start; }
@@ -1077,6 +1339,8 @@ function logIcon(log: WerewolfLog) {
   .ww-roster { position: static; order: 2; }
   .ww-table { order: 1; }
   .ww-side { order: 3; grid-template-columns: 1fr 1fr; }
+  .ww-dialogue { max-height: none; min-height: 460px; }
+  .ww-timeline { min-height: 260px; }
   .ww-identity { grid-column: 1 / -1; }
   .ww-player-list { display: grid; grid-template-columns: 1fr 1fr; }
 }
@@ -1089,6 +1353,10 @@ function logIcon(log: WerewolfLog) {
   .ww-phase-steps { order: 3; width: 100%; }
   .ww-game-bar { gap: 10px; }
   .ww-options { grid-template-columns: 1fr; }
+  .ww-timeline { padding: 4px 12px 16px; }
+  .ww-chat-row { max-width: 100%; }
+  .ww-dialogue-head { padding: 15px 14px 12px; }
+  .ww-composer { padding: 12px 14px 14px; }
   .ww-log-card { border-radius: 16px; }
   .ww-action-card { padding: 19px; }
   .ww-action-card h2 { font-size: 1.28rem; }

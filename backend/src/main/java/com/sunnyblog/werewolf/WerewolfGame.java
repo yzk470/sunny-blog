@@ -200,7 +200,25 @@ public class WerewolfGame {
             if (!mates.isEmpty()) log(humanId, "role", "你的狼队友是：" + mates + "。");
         }
         beginNight();
-        advance();
+    }
+
+    /** Optional model-backed speech writer. Returning blank uses the rule fallback. */
+    public interface SpeechStreamer {
+        String speak(Player speaker, String fallback);
+    }
+
+    private SpeechStreamer speechStreamer;
+
+    public void setSpeechStreamer(SpeechStreamer speechStreamer) {
+        this.speechStreamer = speechStreamer;
+    }
+
+    public List<Player> allPlayers() {
+        return List.copyOf(players);
+    }
+
+    public List<Player> aliveAiPlayers() {
+        return alivePlayers().stream().filter(p -> !p.isHuman()).toList();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -463,7 +481,18 @@ public class WerewolfGame {
 
         for (Player p : alivePlayers()) {
             if (p.isHuman()) continue;
-            String speech = generateSpeech(p);
+            String fallback = generateSpeech(p);
+            String speech = fallback;
+            if (speechStreamer != null) {
+                try {
+                    String generated = speechStreamer.speak(p, fallback);
+                    if (generated != null && !generated.isBlank()) {
+                        speech = generated.trim();
+                    }
+                } catch (Exception ex) {
+                    speech = fallback;
+                }
+            }
             if (speech != null && !speech.isBlank()) {
                 log(null, "speech", p.getName() + "：" + speech);
             }
