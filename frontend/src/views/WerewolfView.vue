@@ -38,6 +38,7 @@ type TimelineEntry =
 
 const streamingSpeech = ref<StreamSpeech | null>(null)
 const thinking = ref('')
+const speakingTurn = ref(false)
 
 const roleOptions = [
   { value: 'random', label: '随机身份', icon: '✦', hint: '把身份交给月白小镇的命运' },
@@ -180,6 +181,7 @@ async function runStream(payload: WerewolfStreamPayload) {
   if (!game.value || busy.value) return
   busy.value = true
   streamingSpeech.value = null
+  speakingTurn.value = false
   thinking.value = 'AI 正在整理这一轮的局势…'
   const gameId = game.value.id
   try {
@@ -187,7 +189,13 @@ async function runStream(payload: WerewolfStreamPayload) {
       onThinking(text) {
         thinking.value = text || 'AI 正在整理这一轮的局势…'
       },
+      onSpeakingTurn() {
+        thinking.value = ''
+        streamingSpeech.value = null
+        speakingTurn.value = true
+      },
       onSpeechStart(data) {
+        speakingTurn.value = false
         streamingSpeech.value = { ...data, text: '' }
       },
       onToken(text) {
@@ -550,7 +558,20 @@ function eventClass(log: WerewolfLog) {
               </div>
 
               <div v-if="!game.over" class="ww-composer">
-                <template v-if="game.waiting">
+                <template v-if="speakingTurn">
+                  <div class="ww-composer-head">
+                    <span>YOUR TURN · SAY SOMETHING</span>
+                    <strong>轮到你发言</strong>
+                  </div>
+                  <p class="ww-composer-prompt">
+                    以 {{ myPlayer?.name || '你' }} 的身份说一句。AI 只知道自己身份和公开信息，下一句会接你的话。
+                  </p>
+                  <div class="ww-speech-form">
+                    <input v-model="speech" maxlength="160" placeholder="例如：我觉得 3 号太安静了，先听听他的解释…" @keyup.enter="makeSpeech" />
+                    <button type="button" class="btn btn-primary" :disabled="busy || !speech.trim()" @click="makeSpeech">发言</button>
+                  </div>
+                </template>
+                <template v-else-if="game.waiting">
                   <div class="ww-composer-head">
                     <span>YOUR MOVE · {{ game.waiting.type.replace('_', ' ') }}</span>
                     <strong>{{ game.waiting.title }}</strong>
@@ -572,15 +593,6 @@ function eventClass(log: WerewolfLog) {
                   <button type="button" class="btn btn-primary ww-confirm" :disabled="busy || !selectedTarget" @click="submitAction">
                     <span v-if="busy" class="spinner small-spinner"></span>
                     {{ busy ? '记录中…' : actionLabel }}
-                  </button>
-                </template>
-                <template v-else-if="game.phase === 'DISCUSSION' && game.humanAlive">
-                  <div class="ww-speech-form">
-                    <input v-model="speech" maxlength="160" placeholder="说点什么，让 AI 记住你的态度…" @keyup.enter="makeSpeech" />
-                    <button type="button" class="btn btn-ghost" :disabled="busy || !speech.trim()" @click="makeSpeech">发言</button>
-                  </div>
-                  <button type="button" class="btn btn-primary ww-continue-btn" :disabled="busy" @click="advance">
-                    {{ busy ? 'AI 思考中…' : '继续 · 进入投票' }}
                   </button>
                 </template>
                 <template v-else>

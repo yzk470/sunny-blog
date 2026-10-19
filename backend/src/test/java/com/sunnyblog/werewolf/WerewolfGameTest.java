@@ -53,6 +53,11 @@ class WerewolfGameTest {
                 int guard = 0;
                 while (!game.toView().over() && guard++ < 220) {
                     WerewolfGame.GameView view = game.toView();
+                    if ("DISCUSSION".equals(view.phase())) {
+                        game.autoDiscussRemaining();
+                        game.advance();
+                        continue;
+                    }
                     if (view.waiting() == null) {
                         game.advance();
                         continue;

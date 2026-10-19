@@ -3,6 +3,7 @@ package com.sunnyblog.werewolf;
 import com.sunnyblog.common.BusinessException;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -14,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class WerewolfService {
@@ -59,22 +61,27 @@ public class WerewolfService {
                 try {
                     attachAi(game);
                     send(emitter, "thinking", Map.of("text", "AI 正在整理这一轮的局势…"));
-                    game.setSpeechStreamer(new ModelSpeechStreamer(emitter, game));
                     String action = request.action() == null ? "ADVANCE" : request.action();
-                    switch (action) {
-                        case "ACTION" -> game.humanAction(request.type(), request.targetId(), request.text());
-                        case "SPEAK" -> game.humanAction("SPEAK", null, request.text());
-                        case "AUTO" -> game.autoPlay();
-                        default -> game.advance();
+                    if ("AUTO".equals(action)) {
+                        streamAuto(game, emitter);
+                    } else {
+                        switch (action) {
+                            case "ACTION" -> game.humanAction(request.type(), request.targetId(), request.text());
+                            case "SPEAK" -> game.humanAction("SPEAK", null, request.text());
+                            default -> game.advance();
+                        }
+                        if (game.getPhase() == WerewolfGame.Phase.DISCUSSION && game.hasPendingDiscussion()) {
+                            streamDiscussion(game, emitter, false);
+                        }
                     }
                     send(emitter, "state", game.toView());
                     send(emitter, "done", Map.of("ok", true));
                 } catch (IllegalStateException | IllegalArgumentException ex) {
                     sendQuietly(emitter, "error", Map.of("message", ex.getMessage()));
                 } catch (Exception ex) {
+                    log.error("Werewolf stream failed", ex);
                     sendQuietly(emitter, "error", Map.of("message", "本回合处理失败，请继续下一步"));
                 } finally {
-                    game.setSpeechStreamer(null);
                     emitter.complete();
                 }
             }
@@ -82,44 +89,52 @@ public class WerewolfService {
         return emitter;
     }
 
-    private final class ModelSpeechStreamer implements WerewolfGame.SpeechStreamer {
-        private final SseEmitter emitter;
-        private final WerewolfGame game;
-        private Map<String, String> plan;
-        private boolean loaded;
-
-        private ModelSpeechStreamer(SseEmitter emitter, WerewolfGame game) {
-            this.emitter = emitter;
-            this.game = game;
-        }
-
-        @Override
-        public String speak(WerewolfGame.Player speaker, String fallback) {
-            if (!loaded) {
-                loaded = true;
-                plan = aiService.generateSpeeches(game);
-                if (plan.isEmpty()) {
-                    sendQuietly(emitter, "thinking", Map.of("text", "本轮由本地 Agent 接替发言…"));
-                }
+    /**
+     * Walks the discussion one speaker at a time. Real model tokens are pushed
+     * as they arrive. When the human's turn comes and autoPlay is false, the
+     * stream pauses and the client sends the human speech through /stream SPEAK.
+     */
+    private boolean streamDiscussion(WerewolfGame game, SseEmitter emitter, boolean autoHuman) {
+        while (game.hasPendingDiscussion()) {
+            WerewolfGame.Player speaker = game.nextDiscussionSpeaker();
+            if (speaker == null) break;
+            if (speaker.isHuman() && !autoHuman) {
+                sendQuietly(emitter, "speaking_turn", Map.of(
+                        "speakerId", speaker.getId(),
+                        "speakerName", speaker.getName(),
+                        "seat", speaker.getSeat()
+                ));
+                sendQuietly(emitter, "state", game.toView());
+                return false;
             }
-            String text = plan.getOrDefault(speaker.getId(), fallback);
             sendQuietly(emitter, "speech_start", Map.of(
                     "speakerId", speaker.getId(),
                     "speakerName", speaker.getName(),
                     "seat", speaker.getSeat()
             ));
-            for (int i = 0; i < text.length(); i += 2) {
-                int end = Math.min(text.length(), i + 2);
-                sendQuietly(emitter, "token", Map.of("text", text.substring(i, end)));
-                try {
-                    Thread.sleep(18);
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
+            String fallback = game.fallbackSpeech(speaker);
+            String text = aiService.streamSpeech(game, speaker, fallback,
+                    token -> sendQuietly(emitter, "token", Map.of("text", token)));
             sendQuietly(emitter, "speech_end", Map.of("text", text));
-            return text;
+            game.recordSpeech(speaker.getId(), text);
+        }
+        game.finishDiscussion();
+        game.advance();
+        return true;
+    }
+
+    private void streamAuto(WerewolfGame game, SseEmitter emitter) {
+        int guard = 0;
+        while (!game.isOver() && guard++ < 120) {
+            if (game.getPhase() == WerewolfGame.Phase.DISCUSSION) {
+                if (!streamDiscussion(game, emitter, true)) return;
+                continue;
+            }
+            if (game.hasWaiting()) {
+                game.autoResolveWaiting();
+                continue;
+            }
+            game.advance();
         }
     }
 

@@ -205,55 +205,26 @@ public class WerewolfGame {
         beginNight();
     }
 
-    /** Optional model-backed speech writer. Returning blank uses the rule fallback. */
-    public interface SpeechStreamer {
-        String speak(Player speaker, String fallback);
-    }
-
     /**
-     * All non-human decisions. The engine validates every returned target, so a
-     * malformed model answer can only fall back locally instead of breaking a game.
+     * Independent model calls for each AI role. Every method receives the game
+     * so the provider can build a context containing only what that role knows.
      */
-    public record NightPlan(
-            String wolfTarget,
-            Boolean witchSave,
-            String witchPoison,
-            String seerCheck
-    ) {}
-
     public interface DecisionProvider {
-        NightPlan chooseNight(WerewolfGame game);
+        String chooseWolfTarget(WerewolfGame game);
+        String chooseSeerCheck(WerewolfGame game, Player seer);
+        Boolean chooseWitchSave(WerewolfGame game, Player witch, Player victim);
+        String chooseWitchPoison(WerewolfGame game, Player witch);
         Map<String, String> chooseVotes(WerewolfGame game, List<Player> voters);
         String chooseHunterShot(WerewolfGame game, Player hunter);
     }
 
-    private SpeechStreamer speechStreamer;
     private DecisionProvider decisionProvider;
-    private NightPlan nightPlan;
-    private boolean nightPlanLoaded;
-
-    public void setSpeechStreamer(SpeechStreamer speechStreamer) {
-        this.speechStreamer = speechStreamer;
-    }
+    private final List<String> discussionQueue = new ArrayList<>();
+    private final Set<String> discussionSpoken = new HashSet<>();
+    private boolean discussionReady;
 
     public void setDecisionProvider(DecisionProvider decisionProvider) {
         this.decisionProvider = decisionProvider;
-        this.nightPlan = null;
-        this.nightPlanLoaded = false;
-    }
-
-    private NightPlan nightPlan() {
-        if (!nightPlanLoaded) {
-            nightPlanLoaded = true;
-            if (decisionProvider != null) {
-                try {
-                    nightPlan = decisionProvider.chooseNight(this);
-                } catch (Exception ignored) {
-                    nightPlan = null;
-                }
-            }
-        }
-        return nightPlan;
     }
 
     public List<Player> allPlayers() {
@@ -307,6 +278,104 @@ public class WerewolfGame {
                 .skip(Math.max(0, view.logs().size() - 26L))
                 .map(l -> "[" + l.phaseLabel() + "] " + l.text())
                 .collect(Collectors.joining("\n"));
+    }
+
+    /**
+     * Builds the private knowledge packet for one agent. This is the only context
+     * a model prompt should receive for that agent.
+     */
+    public String contextFor(Player viewer) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("你是 ").append(viewer.getName()).append("，身份【").append(viewer.getRole().getLabel())
+                .append("】，阵营：").append(viewer.getRole().getTeam().getLabel()).append("。\n");
+        sb.append("当前第 ").append(round).append(" 轮，阶段：").append(phase.getLabel()).append("。\n");
+        sb.append("存活玩家：\n");
+        for (Player p : alivePlayers()) {
+            sb.append("- ").append(p.getName()).append("(").append(p.getId()).append(")")
+                    .append(p.isHuman() ? " [人类]" : "")
+                    .append(p.getClaimedRole() == null ? "" : " [自称" + p.getClaimedRole() + "]")
+                    .append("\n");
+        }
+        if (viewer.getRole() == Role.WEREWOLF) {
+            String mates = alivePlayers().stream()
+                    .filter(p -> p.getRole() == Role.WEREWOLF && !p.getId().equals(viewer.getId()))
+                    .map(Player::getName)
+                    .collect(Collectors.joining("、"));
+            sb.append("你的狼队友：").append(mates.isEmpty() ? "无" : mates).append("。\n");
+        } else if (viewer.getRole() == Role.SEER) {
+            sb.append("你的查验记录：\n");
+            if (seerChecks.isEmpty()) sb.append("- 还没有查验记录\n");
+            else {
+                for (Map.Entry<String, Role> e : seerChecks.entrySet()) {
+                    Player p = player(e.getKey());
+                    sb.append("- ").append(p == null ? e.getKey() : p.getName())
+                            .append("：").append(e.getValue().getLabel()).append("\n");
+                }
+            }
+        } else if (viewer.getRole() == Role.WITCH) {
+            sb.append("你的药剂：解药 ").append(viewer.hasAntidote() ? "可用" : "已用")
+                    .append("，毒药 ").append(viewer.hasPoison() ? "可用" : "已用").append("。\n");
+            if (wolfTarget != null) {
+                Player victim = player(wolfTarget);
+                sb.append("今晚被狼人袭击的是：").append(victim == null ? "未知" : victim.getName()).append("。\n");
+            }
+        } else if (viewer.getRole() == Role.HUNTER) {
+            sb.append("你的猎枪：").append(viewer.hasCanShoot() ? "可以开枪" : "已使用").append("。\n");
+        }
+        sb.append("\n公开事件与发言：\n").append(publicStateText());
+        return sb.toString();
+    }
+
+    public boolean hasPendingDiscussion() {
+        return phase == Phase.DISCUSSION && !discussionQueue.isEmpty();
+    }
+
+    public Player nextDiscussionSpeaker() {
+        while (!discussionQueue.isEmpty()) {
+            Player p = player(discussionQueue.get(0));
+            if (p != null && p.isAlive() && !discussionSpoken.contains(p.getId())) return p;
+            discussionQueue.remove(0);
+        }
+        return null;
+    }
+
+    public void recordSpeech(String playerId, String text) {
+        Player speaker = player(playerId);
+        if (speaker == null || !speaker.isAlive() || text == null || text.isBlank()) return;
+        discussionQueue.remove(playerId);
+        discussionSpoken.add(playerId);
+        log(null, "speech", speaker.getName() + "：" + text.trim());
+    }
+
+    public void finishDiscussion() {
+        if (phase != Phase.DISCUSSION) return;
+        log(null, "system", "讨论结束，进入放逐投票。");
+        discussionQueue.clear();
+        discussionSpoken.clear();
+        discussionReady = false;
+        phase = Phase.VOTE;
+    }
+
+    public void autoDiscussRemaining() {
+        while (hasPendingDiscussion()) {
+            Player speaker = nextDiscussionSpeaker();
+            if (speaker == null) break;
+            recordSpeech(speaker.getId(), generateSpeech(speaker));
+        }
+        finishDiscussion();
+    }
+
+    public boolean hasWaiting() {
+        return waiting != null;
+    }
+
+    public void autoResolveWaiting() {
+        if (waiting == null) return;
+        autoResolveWaitingInternal();
+    }
+
+    public String fallbackSpeech(Player speaker) {
+        return generateSpeech(speaker);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -396,8 +465,6 @@ public class WerewolfGame {
         seerCheckResult = null;
         humanVoteTarget = null;
         pendingHunterId = null;
-        nightPlan = null;
-        nightPlanLoaded = false;
         log(null, "night", "第 " + round + " 夜，天黑请闭眼。");
     }
 
@@ -557,6 +624,11 @@ public class WerewolfGame {
     // ─────────────────────────────────────────────────────────────
 
     private void doDiscussion() {
+        if (discussionReady) return;
+        discussionReady = true;
+        discussionQueue.clear();
+        discussionSpoken.clear();
+
         Player seer = rolePlayer(Role.SEER);
         if (seer != null && !seer.isHuman() && !seerClaimed) {
             String knownWolf = seerChecks.entrySet().stream()
@@ -569,26 +641,10 @@ public class WerewolfGame {
             }
         }
 
-        for (Player p : alivePlayers()) {
-            if (p.isHuman()) continue;
-            String fallback = generateSpeech(p);
-            String speech = fallback;
-            if (speechStreamer != null) {
-                try {
-                    String generated = speechStreamer.speak(p, fallback);
-                    if (generated != null && !generated.isBlank()) {
-                        speech = generated.trim();
-                    }
-                } catch (Exception ex) {
-                    speech = fallback;
-                }
-            }
-            if (speech != null && !speech.isBlank()) {
-                log(null, "speech", p.getName() + "：" + speech);
-            }
-        }
-        log(null, "system", "讨论结束，进入放逐投票。");
-        phase = Phase.VOTE;
+        alivePlayers().stream()
+                .sorted(Comparator.comparingInt(Player::getSeat))
+                .forEach(p -> discussionQueue.add(p.getId()));
+        log(null, "system", "开始发言，按座位顺序轮流说话。");
     }
 
     private void doVote() {
@@ -723,11 +779,13 @@ public class WerewolfGame {
     public void humanAction(String type, String targetId, String text) {
         if (over) throw new IllegalStateException("游戏已经结束");
         if ("SPEAK".equals(type)) {
-            String speech = text == null ? "" : text.trim();
-            if (!speech.isEmpty()) {
-                if (speech.length() > 160) speech = speech.substring(0, 160);
-                log(null, "speech", human().getName() + "：" + speech);
+            if (phase != Phase.DISCUSSION || !discussionQueue.contains(humanId)) {
+                throw new IllegalStateException("现在还没有轮到你发言");
             }
+            String speech = text == null ? "" : text.trim();
+            if (speech.isEmpty()) throw new IllegalArgumentException("发言不能为空");
+            if (speech.length() > 160) speech = speech.substring(0, 160);
+            recordSpeech(humanId, speech);
             return;
         }
         Waiting current = waiting;
@@ -814,14 +872,19 @@ public class WerewolfGame {
     public void autoPlay() {
         int guard = 0;
         while (!over && guard++ < 400) {
+            if (phase == Phase.DISCUSSION) {
+                autoDiscussRemaining();
+                continue;
+            }
             if (waiting != null) {
                 autoResolveWaiting();
+                continue;
             }
             advance();
         }
     }
 
-    private void autoResolveWaiting() {
+    private void autoResolveWaitingInternal() {
         Waiting current = waiting;
         if (current == null) return;
         String type = current.getType();
@@ -873,13 +936,17 @@ public class WerewolfGame {
     public void advance() {
         int guard = 0;
         while (!over && waiting == null && guard++ < 60) {
+            if (phase == Phase.DISCUSSION) {
+                doDiscussion();
+                return;
+            }
             switch (phase) {
                 case NIGHT_WOLF -> doWolfPhase();
                 case NIGHT_WITCH_SAVE -> doWitchSave();
                 case NIGHT_WITCH_POISON -> doWitchPoison();
                 case NIGHT_SEER -> doSeerCheck();
                 case DAWN -> doDawn();
-                case DISCUSSION -> doDiscussion();
+                case DISCUSSION -> { doDiscussion(); return; }
                 case VOTE -> doVote();
                 case HUNTER_SHOOT -> doHunter();
                 case GAME_OVER -> { return; }
@@ -892,11 +959,13 @@ public class WerewolfGame {
     // ─────────────────────────────────────────────────────────────
 
     private String chooseWolfTarget() {
-        NightPlan plan = nightPlan();
-        if (plan != null && plan.wolfTarget() != null) {
-            Player target = player(plan.wolfTarget());
-            if (target != null && target.isAlive() && !target.getRole().isWerewolf()) {
-                return target.getId();
+        if (decisionProvider != null) {
+            try {
+                String planned = decisionProvider.chooseWolfTarget(this);
+                Player target = planned == null ? null : player(planned);
+                return target != null && target.isAlive() && !target.getRole().isWerewolf() ? target.getId() : null;
+            } catch (Exception ignored) {
+                // model unavailable: safe engine fallback
             }
         }
         return ruleWolfTarget();
@@ -919,9 +988,13 @@ public class WerewolfGame {
 
     private boolean aiWitchSave(Player witch, Player victim) {
         if (witch == null || victim == null || !witch.antidote) return false;
-        NightPlan plan = nightPlan();
-        if (plan != null && plan.witchSave() != null) {
-            return plan.witchSave();
+        if (decisionProvider != null) {
+            try {
+                Boolean save = decisionProvider.chooseWitchSave(this, witch, victim);
+                return save != null && save;
+            } catch (Exception ignored) {
+                // model unavailable: safe engine fallback
+            }
         }
         return ruleWitchSave(victim);
     }
@@ -934,13 +1007,15 @@ public class WerewolfGame {
 
     private String aiWitchPoison(Player witch) {
         if (witch == null || !witch.poison) return null;
-        NightPlan plan = nightPlan();
-        if (plan != null) {
-            String planned = plan.witchPoison();
-            if (planned == null || planned.isBlank()) return null;
-            Player target = player(planned);
-            if (target != null && target.isAlive() && !target.getId().equals(witch.getId())) {
-                return target.getId();
+        if (decisionProvider != null) {
+            try {
+                String planned = decisionProvider.chooseWitchPoison(this, witch);
+                if (planned == null || planned.isBlank()) return null;
+                Player target = player(planned);
+                return target != null && target.isAlive() && !target.getId().equals(witch.getId())
+                        ? target.getId() : null;
+            } catch (Exception ignored) {
+                // model unavailable: safe engine fallback
             }
         }
         return ruleWitchPoison(witch);
@@ -963,11 +1038,13 @@ public class WerewolfGame {
     }
 
     private Player chooseSeerCheck(Player seer) {
-        NightPlan plan = nightPlan();
-        if (plan != null && plan.seerCheck() != null) {
-            Player target = player(plan.seerCheck());
-            if (target != null && target.isAlive() && !target.getId().equals(seer.getId())) {
-                return target;
+        if (decisionProvider != null) {
+            try {
+                String planned = decisionProvider.chooseSeerCheck(this, seer);
+                Player target = planned == null ? null : player(planned);
+                return target != null && target.isAlive() && !target.getId().equals(seer.getId()) ? target : null;
+            } catch (Exception ignored) {
+                // model unavailable: safe engine fallback
             }
         }
         return ruleSeerCheck(seer);
@@ -1032,11 +1109,9 @@ public class WerewolfGame {
             try {
                 String planned = decisionProvider.chooseHunterShot(this, hunter);
                 Player target = planned == null ? null : player(planned);
-                if (target != null && target.isAlive() && !target.getId().equals(hunter.getId())) {
-                    return target;
-                }
+                return target != null && target.isAlive() && !target.getId().equals(hunter.getId()) ? target : null;
             } catch (Exception ignored) {
-                // fall through to the local safety choice
+                // model unavailable: safe engine fallback
             }
         }
         return ruleHunterShot(hunter);
