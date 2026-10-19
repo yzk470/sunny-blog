@@ -57,6 +57,7 @@ public class WerewolfService {
         streamExecutor.execute(() -> {
             synchronized (game) {
                 try {
+                    attachAi(game);
                     send(emitter, "thinking", Map.of("text", "AI 正在整理这一轮的局势…"));
                     game.setSpeechStreamer(new ModelSpeechStreamer(emitter, game));
                     String action = request.action() == null ? "ADVANCE" : request.action();
@@ -141,6 +142,7 @@ public class WerewolfService {
     public WerewolfGame.GameView advance(String id) {
         WerewolfGame game = game(id);
         synchronized (game) {
+            attachAi(game);
             game.advance();
             return game.toView();
         }
@@ -149,6 +151,7 @@ public class WerewolfService {
     public WerewolfGame.GameView action(String id, String type, String targetId, String text) {
         WerewolfGame game = game(id);
         synchronized (game) {
+            attachAi(game);
             try {
                 game.humanAction(type, targetId, text);
             } catch (IllegalStateException | IllegalArgumentException ex) {
@@ -161,9 +164,14 @@ public class WerewolfService {
     public WerewolfGame.GameView auto(String id) {
         WerewolfGame game = game(id);
         synchronized (game) {
+            attachAi(game);
             game.autoPlay();
             return game.toView();
         }
+    }
+
+    private void attachAi(WerewolfGame game) {
+        game.setDecisionProvider(aiService.isConfigured() ? aiService : null);
     }
 
     public void delete(String id) {

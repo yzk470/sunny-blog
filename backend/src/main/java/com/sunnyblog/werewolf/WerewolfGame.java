@@ -107,6 +107,9 @@ public class WerewolfGame {
         public boolean isRevealed() { return revealed; }
         public String getClaimedRole() { return claimedRole; }
         public int getSuspicion() { return suspicion; }
+        public boolean hasAntidote() { return antidote; }
+        public boolean hasPoison() { return poison; }
+        public boolean hasCanShoot() { return canShoot; }
     }
 
     public record Option(String id, String label) {}
@@ -207,10 +210,50 @@ public class WerewolfGame {
         String speak(Player speaker, String fallback);
     }
 
+    /**
+     * All non-human decisions. The engine validates every returned target, so a
+     * malformed model answer can only fall back locally instead of breaking a game.
+     */
+    public record NightPlan(
+            String wolfTarget,
+            Boolean witchSave,
+            String witchPoison,
+            String seerCheck
+    ) {}
+
+    public interface DecisionProvider {
+        NightPlan chooseNight(WerewolfGame game);
+        Map<String, String> chooseVotes(WerewolfGame game, List<Player> voters);
+        String chooseHunterShot(WerewolfGame game, Player hunter);
+    }
+
     private SpeechStreamer speechStreamer;
+    private DecisionProvider decisionProvider;
+    private NightPlan nightPlan;
+    private boolean nightPlanLoaded;
 
     public void setSpeechStreamer(SpeechStreamer speechStreamer) {
         this.speechStreamer = speechStreamer;
+    }
+
+    public void setDecisionProvider(DecisionProvider decisionProvider) {
+        this.decisionProvider = decisionProvider;
+        this.nightPlan = null;
+        this.nightPlanLoaded = false;
+    }
+
+    private NightPlan nightPlan() {
+        if (!nightPlanLoaded) {
+            nightPlanLoaded = true;
+            if (decisionProvider != null) {
+                try {
+                    nightPlan = decisionProvider.chooseNight(this);
+                } catch (Exception ignored) {
+                    nightPlan = null;
+                }
+            }
+        }
+        return nightPlan;
     }
 
     public List<Player> allPlayers() {
@@ -219,6 +262,51 @@ public class WerewolfGame {
 
     public List<Player> aliveAiPlayers() {
         return alivePlayers().stream().filter(p -> !p.isHuman()).toList();
+    }
+
+    public List<Player> alivePlayersView() {
+        return List.copyOf(alivePlayers());
+    }
+
+    public List<Player> aliveWerewolvesView() {
+        return List.copyOf(aliveWerewolves());
+    }
+
+    public List<Player> aliveGoodView() {
+        return List.copyOf(aliveGood());
+    }
+
+    public Player humanPlayer() {
+        return human();
+    }
+
+    public Map<String, Integer> suspicionView() {
+        return Map.copyOf(publicSuspicion);
+    }
+
+    public Map<String, Role> seerChecksView() {
+        return Map.copyOf(seerChecks);
+    }
+
+    public String currentWolfTarget() {
+        return wolfTarget;
+    }
+
+    public int getRound() {
+        return round;
+    }
+
+    public Phase getPhase() {
+        return phase;
+    }
+
+    public String publicStateText() {
+        GameView view = toView();
+        return view.logs().stream()
+                .filter(l -> !l.privateLog())
+                .skip(Math.max(0, view.logs().size() - 26L))
+                .map(l -> "[" + l.phaseLabel() + "] " + l.text())
+                .collect(Collectors.joining("\n"));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -308,6 +396,8 @@ public class WerewolfGame {
         seerCheckResult = null;
         humanVoteTarget = null;
         pendingHunterId = null;
+        nightPlan = null;
+        nightPlanLoaded = false;
         log(null, "night", "第 " + round + " 夜，天黑请闭眼。");
     }
 
@@ -514,6 +604,18 @@ public class WerewolfGame {
     }
 
     private void finalizeVote() {
+        Map<String, String> modelVotes = Map.of();
+        if (decisionProvider != null) {
+            List<Player> voters = alivePlayers().stream().filter(p -> !p.isHuman()).toList();
+            if (!voters.isEmpty()) {
+                try {
+                    Map<String, String> generated = decisionProvider.chooseVotes(this, voters);
+                    if (generated != null) modelVotes = generated;
+                } catch (Exception ignored) {
+                    modelVotes = Map.of();
+                }
+            }
+        }
         Map<String, String> votes = new LinkedHashMap<>();
         for (Player p : alivePlayers()) {
             if (p.isHuman()) {
@@ -522,7 +624,7 @@ public class WerewolfGame {
                     votes.put(p.getId(), humanVoteTarget);
                 }
             } else {
-                String target = chooseVote(p);
+                String target = chooseVote(p, modelVotes);
                 if (target != null) votes.put(p.getId(), target);
             }
         }
@@ -735,7 +837,7 @@ public class WerewolfGame {
                 Player targetPlayer = chooseSeerCheck(human());
                 yield targetPlayer == null ? "pass" : targetPlayer.getId();
             }
-            case "VOTE" -> chooseVote(human());
+            case "VOTE" -> autoHumanVote();
             case "HUNTER_SHOOT" -> {
                 Player targetPlayer = chooseHunterShot(human());
                 yield targetPlayer == null ? "pass" : targetPlayer.getId();
@@ -750,6 +852,22 @@ public class WerewolfGame {
             waiting = null;
             advance();
         }
+    }
+
+    private String autoHumanVote() {
+        if (decisionProvider != null) {
+            try {
+                Map<String, String> generated = decisionProvider.chooseVotes(this, List.of(human()));
+                String target = generated == null ? null : generated.get(humanId);
+                Player targetPlayer = target == null ? null : player(target);
+                if (targetPlayer != null && targetPlayer.isAlive() && !targetPlayer.getId().equals(humanId)) {
+                    return target;
+                }
+            } catch (Exception ignored) {
+                // fall through to local safety choice
+            }
+        }
+        return chooseVote(human(), null);
     }
 
     public void advance() {
@@ -774,6 +892,17 @@ public class WerewolfGame {
     // ─────────────────────────────────────────────────────────────
 
     private String chooseWolfTarget() {
+        NightPlan plan = nightPlan();
+        if (plan != null && plan.wolfTarget() != null) {
+            Player target = player(plan.wolfTarget());
+            if (target != null && target.isAlive() && !target.getRole().isWerewolf()) {
+                return target.getId();
+            }
+        }
+        return ruleWolfTarget();
+    }
+
+    private String ruleWolfTarget() {
         List<Player> candidates = aliveGood();
         if (candidates.isEmpty()) return null;
         Player best = null;
@@ -790,6 +919,14 @@ public class WerewolfGame {
 
     private boolean aiWitchSave(Player witch, Player victim) {
         if (witch == null || victim == null || !witch.antidote) return false;
+        NightPlan plan = nightPlan();
+        if (plan != null && plan.witchSave() != null) {
+            return plan.witchSave();
+        }
+        return ruleWitchSave(victim);
+    }
+
+    private boolean ruleWitchSave(Player victim) {
         if (round == 1) return true;
         if (victim.getId().equals(claimedSeerId)) return true;
         return random.nextDouble() < 0.35;
@@ -797,6 +934,19 @@ public class WerewolfGame {
 
     private String aiWitchPoison(Player witch) {
         if (witch == null || !witch.poison) return null;
+        NightPlan plan = nightPlan();
+        if (plan != null) {
+            String planned = plan.witchPoison();
+            if (planned == null || planned.isBlank()) return null;
+            Player target = player(planned);
+            if (target != null && target.isAlive() && !target.getId().equals(witch.getId())) {
+                return target.getId();
+            }
+        }
+        return ruleWitchPoison(witch);
+    }
+
+    private String ruleWitchPoison(Player witch) {
         if (round < 2) return null;
         String knownWolf = seerChecks.entrySet().stream()
                 .filter(e -> e.getValue().isWerewolf())
@@ -813,6 +963,17 @@ public class WerewolfGame {
     }
 
     private Player chooseSeerCheck(Player seer) {
+        NightPlan plan = nightPlan();
+        if (plan != null && plan.seerCheck() != null) {
+            Player target = player(plan.seerCheck());
+            if (target != null && target.isAlive() && !target.getId().equals(seer.getId())) {
+                return target;
+            }
+        }
+        return ruleSeerCheck(seer);
+    }
+
+    private Player ruleSeerCheck(Player seer) {
         List<Player> candidates = alivePlayers().stream()
                 .filter(p -> !p.getId().equals(seer.getId()))
                 .sorted(Comparator.comparingInt((Player p) -> publicSuspicion.getOrDefault(p.getId(), 0)).reversed())
@@ -823,7 +984,20 @@ public class WerewolfGame {
         return candidates.isEmpty() ? null : candidates.get(0);
     }
 
-    private String chooseVote(Player voter) {
+    private String chooseVote(Player voter, Map<String, String> modelVotes) {
+        if (modelVotes != null) {
+            String planned = modelVotes.get(voter.getId());
+            if (planned != null) {
+                Player target = player(planned);
+                if (target != null && target.isAlive() && !target.getId().equals(voter.getId())) {
+                    return planned;
+                }
+            }
+        }
+        return ruleVote(voter);
+    }
+
+    private String ruleVote(Player voter) {
         List<Player> candidates = alivePlayers().stream()
                 .filter(p -> !p.getId().equals(voter.getId()))
                 .toList();
@@ -854,6 +1028,21 @@ public class WerewolfGame {
     }
 
     private Player chooseHunterShot(Player hunter) {
+        if (decisionProvider != null) {
+            try {
+                String planned = decisionProvider.chooseHunterShot(this, hunter);
+                Player target = planned == null ? null : player(planned);
+                if (target != null && target.isAlive() && !target.getId().equals(hunter.getId())) {
+                    return target;
+                }
+            } catch (Exception ignored) {
+                // fall through to the local safety choice
+            }
+        }
+        return ruleHunterShot(hunter);
+    }
+
+    private Player ruleHunterShot(Player hunter) {
         List<Player> candidates = alivePlayers().stream()
                 .filter(p -> !p.getId().equals(hunter.getId()))
                 .sorted(Comparator.comparingInt((Player p) -> publicSuspicion.getOrDefault(p.getId(), 0)).reversed())

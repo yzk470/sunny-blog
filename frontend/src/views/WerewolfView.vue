@@ -314,7 +314,7 @@ function eventClass(log: WerewolfLog) {
             你可以亲自入局，也可以坐下来，看 DeepSeek 驱动的 AI 们把这一夜演完。
           </p>
           <div class="ww-hero-tags">
-            <span>{{ aiConfigured ? 'DeepSeek 配音发言' : '本地 Agent 模式' }}</span>
+            <span>{{ aiConfigured ? 'DeepSeek 决策 + 发言' : '模型未配置 · 本地回退' }}</span>
             <span>人机对战</span>
             <span>流式对话</span>
           </div>
@@ -426,7 +426,7 @@ function eventClass(log: WerewolfLog) {
           </div>
           <div class="ww-game-actions">
             <span class="ww-ai-state" :class="{ on: aiConfigured }">
-              {{ aiConfigured ? 'DeepSeek 已接入' : '本地 Agent' }}
+              {{ aiConfigured ? 'DeepSeek 决策' : '本地回退' }}
             </span>
             <button type="button" class="ww-icon-btn" title="换个角色" @click="resetGame">＋ 新局</button>
             <button type="button" class="ww-icon-btn" :disabled="busy || game.over" title="自动演算" @click="autoPlay">
@@ -636,7 +636,7 @@ function eventClass(log: WerewolfLog) {
               <button type="button" class="btn btn-ghost" :disabled="busy || game.over" @click="autoPlay">
                 {{ busy ? '演算中…' : '✦ 自动演算完整局' }}
               </button>
-              <p>{{ aiConfigured ? 'AI 发言由 DeepSeek 生成，并逐字流式返回。' : '当前没有可用的模型 Key，AI 发言由本地 Agent 生成。' }}</p>
+              <p>{{ aiConfigured ? 'AI 的刀人、查验、用药、投票、开枪和发言全部由 DeepSeek 决策。' : '当前没有可用的模型 Key，已启用本地安全回退。' }}</p>
             </section>
           </aside>
         </div>
