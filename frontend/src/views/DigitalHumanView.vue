@@ -530,6 +530,7 @@ async function runGesture(key: string, options: GestureOptions) {
 
 function resetGestureState() {
   gestureEpoch += 1
+  gestureRequest += 1
   gestureQueue = []
   gestureBusy = false
   window.clearTimeout(motionTimer)
