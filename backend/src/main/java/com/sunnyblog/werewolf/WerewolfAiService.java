@@ -107,12 +107,12 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                 + "\n\n近期公开事件：\n" + game.publicStateText()
                 + "\n\n请从狼队收益、女巫用药收益和预言家信息收益三个角度综合决策，输出 JSON。";
 
-        JsonNode json = callJson(system, user, 22);
+        JsonNode json = callJson(system, user, 45);
         if (json == null) return null;
-        String wolfTarget = textOrNull(json, "wolfTarget");
+        String wolfTarget = resolveId(game, textOrNull(json, "wolfTarget"));
         Boolean witchSave = boolOrNull(json, "witchSave");
-        String witchPoison = textOrNull(json, "witchPoison");
-        String seerCheck = textOrNull(json, "seerCheck");
+        String witchPoison = resolveId(game, textOrNull(json, "witchPoison"));
+        String seerCheck = resolveId(game, textOrNull(json, "seerCheck"));
         log.info("Werewolf AI night plan: wolf={}, save={}, poison={}, check={}",
                 wolfTarget, witchSave, witchPoison, seerCheck);
         return new WerewolfGame.NightPlan(wolfTarget, witchSave, witchPoison, seerCheck);
@@ -158,12 +158,14 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                 + "\n\n近期公开事件：\n" + game.publicStateText()
                 + "\n\n请为每个需要投票的 AI 给出目标 ID，输出 JSON。";
 
-        JsonNode json = callJson(system, user, 18);
+        JsonNode json = callJson(system, user, 30);
         if (json == null || !json.isObject()) return Map.of();
         Map<String, String> result = new LinkedHashMap<>();
         json.fields().forEachRemaining(entry -> {
-            if (entry.getValue().isTextual()) {
-                result.put(entry.getKey(), entry.getValue().asText().trim());
+            String voterId = resolveId(game, entry.getKey());
+            String targetId = entry.getValue().isTextual() ? resolveId(game, entry.getValue().asText()) : null;
+            if (voterId != null && targetId != null) {
+                result.put(voterId, targetId);
             }
         });
         log.info("Werewolf AI votes: {}", result);
@@ -186,9 +188,9 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                     .collect(Collectors.joining("\n"))
                 + "\n\n近期公开事件：\n" + game.publicStateText()
                 + "\n\n请输出 JSON。";
-        JsonNode json = callJson(system, user, 18);
+        JsonNode json = callJson(system, user, 30);
         if (json == null) return null;
-        String target = textOrNull(json, "targetId");
+        String target = resolveId(game, textOrNull(json, "targetId"));
         log.info("Werewolf AI hunter shot: {}", target);
         return target;
     }
@@ -228,14 +230,14 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                 + "\n\n近期公开事件：\n" + publicLog
                 + "\n\n请输出 JSON。";
 
-        JsonNode json = callJson(system, user, 22);
+        JsonNode json = callJson(system, user, 45);
         if (json == null) return Map.of();
         Map<String, String> result = new LinkedHashMap<>();
         json.fields().forEachRemaining(entry -> {
-            if (entry.getValue().isTextual()) {
-                String value = entry.getValue().asText().trim();
-                if (!value.isEmpty()) result.put(entry.getKey(), value);
-            }
+            if (!entry.getValue().isTextual()) return;
+            String speakerId = resolveId(game, entry.getKey());
+            String value = entry.getValue().asText().trim();
+            if (speakerId != null && !value.isEmpty()) result.put(speakerId, value);
         });
         if (!result.isEmpty()) log.info("Werewolf AI generated {} speeches", result.size());
         return result;
@@ -340,5 +342,25 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                 .filter(p -> p.getId().equals(id))
                 .map(WerewolfGame.Player::getName)
                 .findFirst().orElse(id);
+    }
+
+    /**
+     * Models sometimes answer with a seat/name ("3号 阿澈") instead of p3.
+     * Resolve both forms so a valid model decision does not silently fall back.
+     */
+    private String resolveId(WerewolfGame game, String raw) {
+        if (raw == null) return null;
+        String value = raw.trim();
+        if (value.isEmpty() || "null".equalsIgnoreCase(value)) return null;
+        for (WerewolfGame.Player p : game.allPlayers()) {
+            if (value.equals(p.getId())) return p.getId();
+        }
+        for (WerewolfGame.Player p : game.allPlayers()) {
+            if (value.equals(p.getName())) return p.getId();
+        }
+        for (WerewolfGame.Player p : game.allPlayers()) {
+            if (value.contains(p.getId()) || value.contains(p.getName())) return p.getId();
+        }
+        return null;
     }
 }
