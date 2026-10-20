@@ -18,6 +18,7 @@ interface ChatMessage {
   content: string
   activities: Activity[]
   artifacts: AgentArtifact[]
+  taskId?: string
   validation?: string
   failed?: boolean
   streaming?: boolean
@@ -138,6 +139,7 @@ async function send(text?: string) {
               sessionId.value = message
               localStorage.setItem(SESSION_KEY, message)
             }
+            if (detail) assistant.taskId = detail
             return
           }
           if (type === 'status') activity('status', message || '处理中…')
@@ -294,6 +296,7 @@ function formatSize(size: number) {
               <em v-if="message.streaming">思考与执行中…</em>
               <em v-else-if="message.failed" class="bad">未完成</em>
               <em v-else-if="message.validation" class="ok">已验收</em>
+              <em v-if="message.taskId" class="task-id">task {{ message.taskId.slice(0, 8) }}</em>
             </div>
 
             <div v-if="message.activities.length" class="agent-activities">
@@ -448,6 +451,7 @@ function formatSize(size: number) {
 .agent-message-meta em { font-style: normal; color: #9aa3ac; }
 .agent-message-meta em.ok { color: #3d7a65; }
 .agent-message-meta em.bad { color: #a15a4f; }
+.agent-message-meta em.task-id { color: #aeb7bf; font-family: Consolas, monospace; font-size: 9px; }
 .agent-activities { display: flex; flex-direction: column; gap: 4px; margin-bottom: 7px; width: 100%; }
 .agent-activity { border: 1px solid rgba(115, 135, 154, 0.16); border-radius: 9px; background: rgba(247, 249, 250, 0.86); color: #667789; font-size: 11px; }
 .agent-activity.failed { border-color: rgba(168, 93, 78, 0.25); }

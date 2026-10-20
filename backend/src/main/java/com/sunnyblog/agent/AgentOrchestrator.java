@@ -7,6 +7,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -21,6 +24,7 @@ public class AgentOrchestrator {
     private final AgentPlanExecuteService planExecute;
     private final AgentArtifactService artifacts;
     private final AgentToolExecutor tools;
+    private final Map<String, ReentrantLock> sessionLocks = new ConcurrentHashMap<>();
 
     public record Result(String sessionId, String runId, String mode, String answer, String validation) {
     }
@@ -32,78 +36,94 @@ public class AgentOrchestrator {
         }
         if (question == null || question.isBlank()) throw new IllegalArgumentException("问题不能为空");
         AgentMemoryService.Session session = memory.getOrCreate(sessionId);
+        ReentrantLock sessionLock = sessionLocks.computeIfAbsent(session.getId(), key -> new ReentrantLock());
+        if (!sessionLock.tryLock()) {
+            events.accept(new AgentEvent("error", "当前对话正在执行",
+                    "同一个 session 同时只允许一个任务。请等待当前任务完成，或点击“新对话”创建独立任务。"));
+            events.accept(new AgentEvent("done", "当前对话忙碌", ""));
+            return new Result(session.getId(), "", resolveMode(question, requestedMode),
+                    "当前对话正在执行，请等待完成或新建对话。", "");
+        }
         String mode = resolveMode(question, requestedMode);
         AgentRunService.AgentRun run = runs.create(session.getId(), question, mode);
         Instant started = Instant.now();
+        AgentTaskContext.set(session.getId(), run.getId());
         tools.setKnowledgeBases(knowledgeBaseIds);
-        events.accept(new AgentEvent("session", session.getId(), run.getId()));
-        events.accept(new AgentEvent("status", "正在读取记忆与技能…", ""));
-
-        String memoryContext = memory.buildPromptContext(session.getId(), 7000);
-        memory.append(session.getId(), "user", question, memory.classify(question), "question");
-
-        String answer;
-        String validation = "";
         try {
-            if ("plan".equals(mode)) {
-                events.accept(new AgentEvent("status", "识别为长任务，进入 plan-and-execute…", ""));
-                answer = ensureAnswer(planExecute.run(question, memoryContext, run, events, started), started);
-                validation = "独立验收已包含在计划执行流程中";
-            } else {
-                events.accept(new AgentEvent("status", "识别为短任务，进入 ReAct 循环…", ""));
-                answer = ensureAnswer(react.run(question, memoryContext, run, events, 12), started);
-                String artifactManifest = artifacts.manifestSince(started);
-                Validation result = validate(question, answer, artifactManifest);
-                validation = result.reason;
-                runs.addStep(run, "VALIDATION", result.passed ? "独立验收通过" : "独立验收未通过",
-                        result.reason, result.passed);
-                events.accept(new AgentEvent("validation",
-                        result.passed ? "独立验收通过" : "独立验收要求修改", result.reason));
-                if (!result.passed) {
-                    String revised = react.run("""
-                            用户任务：%s
+            events.accept(new AgentEvent("session", session.getId(), run.getId()));
+            events.accept(new AgentEvent("status", "正在读取记忆与技能…", ""));
 
-                            你上一版回答：
-                            %s
+            String memoryContext = memory.buildPromptContext(session.getId(), 7000);
+            memory.append(session.getId(), "user", question, memory.classify(question), "question");
 
-                            独立验收意见：
-                            %s
-
-                            请不要辩解，直接修正并重新完成任务。
-                            """.formatted(question, answer, result.reason),
-                            memoryContext, run, events, 6);
-                    Validation second = validate(question, revised, artifacts.manifestSince(started));
-                    validation = second.reason;
-                    runs.addStep(run, "VALIDATION", second.passed ? "复审通过" : "复审未通过",
-                            second.reason, second.passed);
+            String answer;
+            String validation = "";
+            try {
+                if ("plan".equals(mode)) {
+                    events.accept(new AgentEvent("status", "识别为长任务，进入 plan-and-execute…", ""));
+                    answer = ensureAnswer(planExecute.run(question, memoryContext, run, events, started), run.getId());
+                    validation = "独立验收已包含在计划执行流程中";
+                } else {
+                    events.accept(new AgentEvent("status", "识别为短任务，进入 ReAct 循环…", ""));
+                    answer = ensureAnswer(react.run(question, memoryContext, run, events, 12), run.getId());
+                    String artifactManifest = artifacts.manifestRun(run.getId());
+                    Validation result = validate(question, answer, artifactManifest);
+                    validation = result.reason;
+                    runs.addStep(run, "VALIDATION", result.passed ? "独立验收通过" : "独立验收未通过",
+                            result.reason, result.passed);
                     events.accept(new AgentEvent("validation",
-                            second.passed ? "复审通过" : "复审仍有问题", second.reason));
-                    answer = revised;
-                }
-            }
-        } catch (Exception ex) {
-            log.warn("Agent execution failed: {}", ex.getMessage(), ex);
-            runs.addStep(run, "ERROR", "执行失败", ex.getMessage(), false);
-            String failed = "抱歉，任务执行失败：" + ex.getMessage()
-                    + "\n\n你可以把任务拆小一点，或补充更明确的输入后重试。";
-            memory.append(session.getId(), "assistant", failed, "MEDIUM", "error");
-            runs.finish(run, failed, "FAILED", validation);
-            events.accept(new AgentEvent("error", "执行失败", ex.getMessage()));
-            return new Result(session.getId(), run.getId(), mode, failed, validation);
-        } finally {
-            tools.clearKnowledgeBases();
-        }
+                            result.passed ? "独立验收通过" : "独立验收要求修改", result.reason));
+                    if (!result.passed) {
+                        String revised = react.run("""
+                                用户任务：%s
 
-        String finalAnswer = answer == null || answer.isBlank() ? "任务已结束，但没有生成有效回答。" : answer;
-        List<AgentArtifactService.Artifact> produced = artifacts.listSince(started);
-        events.accept(new AgentEvent("artifacts",
-                produced.isEmpty() ? "本轮没有生成文件产物" : "生成了 " + produced.size() + " 个文件",
-                artifacts.json(produced)));
-        memory.append(session.getId(), "assistant", finalAnswer, "MEDIUM", "answer");
-        runs.finish(run, finalAnswer, "DONE", validation);
-        events.accept(new AgentEvent("answer", finalAnswer, validation));
-        events.accept(new AgentEvent("done", "完成", run.getId()));
-        return new Result(session.getId(), run.getId(), mode, finalAnswer, validation);
+                                你上一版回答：
+                                %s
+
+                                独立验收意见：
+                                %s
+
+                                请不要辩解，直接修正并重新完成任务。
+                                """.formatted(question, answer, result.reason),
+                                memoryContext, run, events, 6);
+                        Validation second = validate(question, revised, artifacts.manifestRun(run.getId()));
+                        validation = second.reason;
+                        runs.addStep(run, "VALIDATION", second.passed ? "复审通过" : "复审未通过",
+                                second.reason, second.passed);
+                        events.accept(new AgentEvent("validation",
+                                second.passed ? "复审通过" : "复审仍有问题", second.reason));
+                        answer = revised;
+                    }
+                }
+            } catch (Exception ex) {
+                log.warn("Agent execution failed: {}", ex.getMessage(), ex);
+                runs.addStep(run, "ERROR", "执行失败", ex.getMessage(), false);
+                String failed = "抱歉，任务执行失败：" + ex.getMessage()
+                        + "\n\n你可以把任务拆小一点，或补充更明确的输入后重试。";
+                memory.append(session.getId(), "assistant", failed, "MEDIUM", "error");
+                runs.finish(run, failed, "FAILED", validation);
+                events.accept(new AgentEvent("error", "执行失败", ex.getMessage()));
+                return new Result(session.getId(), run.getId(), mode, failed, validation);
+            }
+
+            String finalAnswer = answer == null || answer.isBlank() ? "任务已结束，但没有生成有效回答。" : answer;
+            List<AgentArtifactService.Artifact> produced = artifacts.listRun(run.getId());
+            events.accept(new AgentEvent("artifacts",
+                    produced.isEmpty() ? "本轮没有生成文件产物" : "生成了 " + produced.size() + " 个文件",
+                    artifacts.json(produced)));
+            memory.append(session.getId(), "assistant", finalAnswer, "MEDIUM", "answer");
+            runs.finish(run, finalAnswer, "DONE", validation);
+            events.accept(new AgentEvent("answer", finalAnswer, validation));
+            events.accept(new AgentEvent("done", "完成", run.getId()));
+            return new Result(session.getId(), run.getId(), mode, finalAnswer, validation);
+        } finally {
+            AgentTaskContext.clear();
+            tools.clearKnowledgeBases();
+            sessionLock.unlock();
+            if (!sessionLock.isLocked() && !sessionLock.hasQueuedThreads()) {
+                sessionLocks.remove(session.getId(), sessionLock);
+            }
+        }
     }
 
     /**
@@ -135,13 +155,13 @@ public class AgentOrchestrator {
     public record Validation(boolean passed, String reason) {
     }
 
-    private String ensureAnswer(String answer, Instant started) {
+    private String ensureAnswer(String answer, String runId) {
         if (answer != null && !answer.isBlank()
                 && !answer.contains("步数已达到上限")
                 && !answer.contains("没有生成有效回答")) {
             return answer;
         }
-        List<AgentArtifactService.Artifact> produced = artifacts.listSince(started);
+        List<AgentArtifactService.Artifact> produced = artifacts.listRun(runId);
         if (produced.isEmpty()) return answer;
         StringBuilder sb = new StringBuilder("任务已完成，并生成了这些产物：\n");
         for (AgentArtifactService.Artifact artifact : produced) {

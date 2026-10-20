@@ -56,8 +56,20 @@ public class AgentArtifactService {
     }
 
     public List<Artifact> list() {
+        return listFrom(root());
+    }
+
+    /** Only artifacts produced by one task/run. */
+    public List<Artifact> listRun(String runId) {
+        if (runId == null || runId.isBlank()) return List.of();
+        Path runRoot = root().resolve(runId).normalize();
+        if (!runRoot.startsWith(root()) || !Files.isDirectory(runRoot)) return List.of();
+        return listFrom(runRoot);
+    }
+
+    private List<Artifact> listFrom(Path base) {
         List<Artifact> result = new ArrayList<>();
-        try (Stream<Path> stream = Files.walk(root(), 8)) {
+        try (Stream<Path> stream = Files.walk(base, 8)) {
             stream.filter(Files::isRegularFile)
                     .filter(p -> !p.getFileName().toString().startsWith("."))
                     .sorted(Comparator.comparing((Path p) -> {
@@ -85,6 +97,39 @@ public class AgentArtifactService {
         } catch (IOException ignored) {
         }
         return result;
+    }
+
+    public String manifestRun(String runId) {
+        List<Artifact> artifacts = listRun(runId);
+        if (artifacts.isEmpty()) return "本轮没有新增产物文件。";
+        StringBuilder sb = new StringBuilder("本轮任务产物：\n");
+        for (Artifact artifact : artifacts) {
+            sb.append("- ").append(artifact.path()).append(" (")
+                    .append(artifact.type()).append(", ").append(artifact.size()).append(" bytes)");
+            String detail = inspectSummary(artifact.path());
+            if (!detail.isBlank()) sb.append("：").append(detail);
+            sb.append("\n");
+        }
+        return sb.toString();
+    }
+
+    public String inspectForRun(String runId, String relative) {
+        if (runId == null || runId.isBlank()) return inspect(relative);
+        if (relative != null && relative.startsWith("artifacts/")) relative = relative.substring("artifacts/".length());
+        Path runRoot = root().resolve(runId).normalize();
+        if (!runRoot.startsWith(root())) return "非法任务产物路径";
+        Path path = runRoot.resolve(relative == null ? "" : relative).normalize();
+        if (!path.startsWith(runRoot)) return "非法任务产物路径";
+        if (!Files.isRegularFile(path)) return "产物不存在: " + relative;
+        try {
+            String globalRelative = root().relativize(path).toString().replace('\\', '/');
+            String type = typeOf(globalRelative);
+            String summary = inspectSummary(globalRelative);
+            return "产物: " + relative + "\n类型: " + type + "\n大小: " + Files.size(path)
+                    + " bytes\n" + (summary.isBlank() ? "无额外结构信息" : summary);
+        } catch (IOException ex) {
+            return "无法读取产物: " + ex.getMessage();
+        }
     }
 
     public String manifestSince(Instant since) {

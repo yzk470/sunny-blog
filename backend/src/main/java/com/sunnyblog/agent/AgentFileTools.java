@@ -52,7 +52,17 @@ public class AgentFileTools {
     }
 
     public Path artifactsRoot() {
-        return root("artifacts");
+        Path base = root("artifacts");
+        String runId = AgentTaskContext.runId();
+        if (runId == null || runId.isBlank()) return base;
+        Path runRoot = base.resolve(runId).normalize();
+        if (!runRoot.startsWith(base)) throw new IllegalStateException("非法任务产物路径");
+        try {
+            Files.createDirectories(runRoot);
+        } catch (IOException ex) {
+            throw new IllegalStateException("无法创建任务产物目录", ex);
+        }
+        return runRoot;
     }
 
     private Path root(String name) {

@@ -63,7 +63,8 @@ public class AgentToolExecutor {
                 case "write_file" -> fileTools.write(text(input, "scope"), text(input, "path"), text(input, "content"));
                 case "list_files" -> fileTools.list(text(input, "scope"), text(input, "path"));
                 case "delete_file" -> fileTools.delete(text(input, "scope"), text(input, "path"));
-                case "inspect_artifact" -> AgentFileTools.ToolResult.ok(artifacts.inspect(text(input, "path")));
+                case "inspect_artifact" -> AgentFileTools.ToolResult.ok(
+                        artifacts.inspectForRun(AgentTaskContext.runId(), text(input, "path")));
                 case "search_knowledge" -> {
                     String query = text(input, "query");
                     List<String> ids = SELECTED_KNOWLEDGE.get();

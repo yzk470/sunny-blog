@@ -79,7 +79,7 @@ public class AgentPlanExecuteService {
             graph.addNode("execute", executeAction);
             AsyncNodeAction<AgentState> validateAction = state -> {
                 String answer = state.value("answer", "");
-                Validation validation = validate(task, answer, artifacts.manifestSince(since));
+                Validation validation = validate(task, answer, artifacts.manifestRun(run.getId()));
                 runs.addStep(run, "VALIDATION", validation.passed ? "验收通过" : "验收未通过",
                         validation.reason, validation.passed);
                 events.accept(new AgentEvent("validation",
