@@ -113,12 +113,14 @@ public class AgentOrchestrator {
                     events.accept(new AgentEvent("status", "识别为长任务，进入 plan-and-execute…", ""));
                     answer = ensureAnswer(planExecute.run(question, memoryContext, run, events), run.getId());
                     validation = "独立验收已包含在计划执行流程中";
+                    if (isCancelled(run)) return pause(session, run, mode, validation, events);
                 } else {
                     checkpoint.setPhase("react");
                     runs.checkpoint(run);
                     events.accept(new AgentEvent("status", "识别为短任务，进入 ReAct 循环…", ""));
                     answer = ensureAnswer(react.run(question, memoryContext, run,
                             checkpoint.getReact(), events, 12), run.getId());
+                    if (isCancelled(run)) return pause(session, run, mode, validation, events);
                     String artifactManifest = artifacts.manifestRun(run.getId());
                     Validation result = validate(question, answer, artifactManifest);
                     validation = result.reason;
@@ -223,6 +225,19 @@ public class AgentOrchestrator {
     }
 
     public record Validation(boolean passed, String reason) {
+    }
+
+    private boolean isCancelled(AgentRunService.AgentRun run) {
+        return "CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId());
+    }
+
+    private Result pause(AgentMemoryService.Session session, AgentRunService.AgentRun run,
+                         String mode, String validation, Consumer<AgentEvent> events) {
+        String cancelled = "任务已按请求停止，可以稍后从 checkpoint 继续。";
+        runs.finish(run, cancelled, "PAUSED", validation);
+        events.accept(new AgentEvent("answer", cancelled, "已暂停，可恢复"));
+        events.accept(new AgentEvent("done", "已暂停", run.getId()));
+        return new Result(session.getId(), run.getId(), mode, cancelled, validation);
     }
 
     private String ensureAnswer(String answer, String runId) {
