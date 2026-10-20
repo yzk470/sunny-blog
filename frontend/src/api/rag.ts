@@ -16,6 +16,8 @@ export interface RagFile {
   size: number
   type: string
   strategy: string
+  chunkSize?: number
+  overlap?: number
   chunks: number
   createdAt: string
 }
@@ -26,6 +28,23 @@ export interface RetrievedChunk {
   source: string
   content: string
   score: number
+}
+
+export interface PreviewChunk {
+  index: number
+  length: number
+  content: string
+}
+
+export interface RagPreview {
+  filename: string
+  size: number
+  kind: string
+  textChars: number
+  strategy: string
+  chunkSize: number
+  overlap: number
+  chunks: PreviewChunk[]
 }
 
 export const ragApi = {
@@ -44,10 +63,12 @@ export const ragApi = {
   files(id: string) {
     return httpGet<RagFile[]>(`/admin/rag/databases/${encodeURIComponent(id)}/files`)
   },
-  async upload(id: string, file: File, strategy: string) {
+  async upload(id: string, file: File, strategy: string, chunkSize: number, overlap: number) {
     const form = new FormData()
     form.append('file', file)
     form.append('strategy', strategy)
+    form.append('chunkSize', String(chunkSize))
+    form.append('overlap', String(overlap))
     const token = localStorage.getItem(TOKEN_KEY)
     const response = await fetch(`/api/admin/rag/databases/${encodeURIComponent(id)}/files`, {
       method: 'POST',
@@ -57,6 +78,22 @@ export const ragApi = {
     const body = await response.json()
     if (!response.ok || body.code !== 0) throw new Error(body.message || '上传失败')
     return body.data as RagFile
+  },
+  async preview(file: File, strategy: string, chunkSize: number, overlap: number) {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('strategy', strategy)
+    form.append('chunkSize', String(chunkSize))
+    form.append('overlap', String(overlap))
+    const token = localStorage.getItem(TOKEN_KEY)
+    const response = await fetch('/api/admin/rag/preview', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    })
+    const body = await response.json()
+    if (!response.ok || body.code !== 0) throw new Error(body.message || '预览失败')
+    return body.data as RagPreview
   },
   deleteFile(id: string, fileId: string) {
     return httpDelete<void>(`/admin/rag/databases/${encodeURIComponent(id)}/files/${encodeURIComponent(fileId)}`)

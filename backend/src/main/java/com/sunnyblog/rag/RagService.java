@@ -49,8 +49,17 @@ public class RagService {
         private long size;
         private String type;
         private String strategy;
+        private int chunkSize;
+        private int overlap;
         private int chunks;
         private String createdAt;
+    }
+
+    public record PreviewChunk(int index, int length, String content) {
+    }
+
+    public record Preview(String filename, long size, String kind, int textChars,
+                          String strategy, int chunkSize, int overlap, List<PreviewChunk> chunks) {
     }
 
     @Data
@@ -125,12 +134,55 @@ public class RagService {
         }
     }
 
+    public synchronized Preview preview(MultipartFile file, RagChunkingService.Strategy strategy,
+                                        int chunkSize, int overlap) {
+        if (file == null || file.isEmpty()) throw new IllegalArgumentException("文件为空");
+        if (file.getSize() > 30 * 1024 * 1024) throw new IllegalArgumentException("文件不能超过 30MB");
+        int size = Math.max(200, Math.min(4000, chunkSize));
+        int gap = Math.max(0, Math.min(size / 2, overlap));
+        String filename = file.getOriginalFilename() == null ? "upload.txt" : file.getOriginalFilename();
+        String safeName = filename.replaceAll("[\\\\/:*?\"<>|]", "_");
+        Path tempDir = root().resolve(".preview");
+        Path temp = tempDir.resolve(UUID.randomUUID() + "_" + safeName);
+        try {
+            Files.createDirectories(tempDir);
+            file.transferTo(temp);
+            RagTextExtractor.Extracted extracted = extractor.extract(temp, filename);
+            List<String> chunks;
+            String kind = extracted.kind();
+            if ("image".equals(kind)) {
+                chunks = List.of("[图片] " + filename);
+            } else {
+                chunks = chunking.chunk(extracted.text(), strategy, size, gap);
+            }
+            List<PreviewChunk> previewChunks = new ArrayList<>();
+            int total = 0;
+            for (int i = 0; i < Math.min(chunks.size(), 200); i++) {
+                String chunk = chunks.get(i);
+                total += chunk.length();
+                previewChunks.add(new PreviewChunk(i, chunk.length(), chunk));
+            }
+            return new Preview(filename, file.getSize(), kind, total,
+                    strategy.name().toLowerCase(Locale.ROOT), size, gap, previewChunks);
+        } catch (Exception ex) {
+            throw new IllegalStateException("预览切分失败: " + ex.getMessage(), ex);
+        } finally {
+            try {
+                Files.deleteIfExists(temp);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
     public synchronized RagFile addFile(String databaseId, MultipartFile file,
-                                        RagChunkingService.Strategy strategy) {
+                                        RagChunkingService.Strategy strategy,
+                                        int chunkSize, int overlap) {
         RagDatabase db = getDatabase(databaseId);
         if (db == null) throw new IllegalArgumentException("知识库不存在");
         if (file == null || file.isEmpty()) throw new IllegalArgumentException("文件为空");
         if (file.getSize() > 30 * 1024 * 1024) throw new IllegalArgumentException("文件不能超过 30MB");
+        int size = Math.max(200, Math.min(4000, chunkSize));
+        int gap = Math.max(0, Math.min(size / 2, overlap));
         String filename = file.getOriginalFilename() == null ? "upload.txt" : file.getOriginalFilename();
         String safeName = filename.replaceAll("[\\\\/:*?\"<>|]", "_");
         String fileId = "f-" + UUID.randomUUID().toString().substring(0, 10);
@@ -143,6 +195,8 @@ public class RagService {
         ragFile.setStoredName(safeName);
         ragFile.setSize(file.getSize());
         ragFile.setStrategy(strategy.name().toLowerCase(Locale.ROOT));
+        ragFile.setChunkSize(size);
+        ragFile.setOverlap(gap);
         ragFile.setType(extensionOf(safeName));
         ragFile.setCreatedAt(Instant.now().toString());
         try {
@@ -156,7 +210,7 @@ public class RagService {
                 chunks = List.of("[图片] " + filename);
                 vectors.add(embeddings.embedImage(stored, mime));
             } else {
-                chunks = chunking.chunk(extracted.text(), strategy);
+                chunks = chunking.chunk(extracted.text(), strategy, size, gap);
                 if (chunks.isEmpty()) throw new IllegalArgumentException("文件没有可提取的文本");
                 for (String chunk : chunks) {
                     vectors.add(embeddings.embedText(chunk));

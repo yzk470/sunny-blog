@@ -54,10 +54,25 @@ public class RagAdminController {
     @PostMapping("/databases/{id}/files")
     public ApiResponse<RagService.RagFile> upload(@PathVariable String id,
                                                    @RequestParam("file") MultipartFile file,
-                                                   @RequestParam(defaultValue = "FIXED") String strategy) {
+                                                   @RequestParam(defaultValue = "FIXED") String strategy,
+                                                   @RequestParam(defaultValue = "800") int chunkSize,
+                                                   @RequestParam(defaultValue = "120") int overlap) {
         try {
             RagChunkingService.Strategy mode = RagChunkingService.Strategy.valueOf(strategy.toUpperCase(Locale.ROOT));
-            return ApiResponse.ok(ragService.addFile(id, file, mode));
+            return ApiResponse.ok(ragService.addFile(id, file, mode, chunkSize, overlap));
+        } catch (Exception ex) {
+            return ApiResponse.fail(500, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/preview")
+    public ApiResponse<RagService.Preview> preview(@RequestParam("file") MultipartFile file,
+                                                    @RequestParam(defaultValue = "FIXED") String strategy,
+                                                    @RequestParam(defaultValue = "800") int chunkSize,
+                                                    @RequestParam(defaultValue = "120") int overlap) {
+        try {
+            RagChunkingService.Strategy mode = RagChunkingService.Strategy.valueOf(strategy.toUpperCase(Locale.ROOT));
+            return ApiResponse.ok(ragService.preview(file, mode, chunkSize, overlap));
         } catch (Exception ex) {
             return ApiResponse.fail(500, ex.getMessage());
         }
