@@ -2,6 +2,7 @@ package com.sunnyblog.werewolf;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
@@ -34,6 +35,7 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
     private final ObjectMapper objectMapper;
     private final boolean configured;
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
+    private final ExecutorService callExecutor = Executors.newFixedThreadPool(6);
 
     public WerewolfAiService(ObjectProvider<ChatClient.Builder> builderProvider,
                              ObjectMapper objectMapper,
@@ -52,6 +54,12 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
 
     public boolean isConfigured() {
         return configured;
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        executor.shutdownNow();
+        callExecutor.shutdownNow();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -278,12 +286,13 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                 + "\n\n" + tail;
     }
 
-    private JsonNode callJson(String system, String user, int timeoutSeconds) {        try {
+    private JsonNode callJson(String system, String user, int timeoutSeconds) {
+        try {
             String raw = CompletableFuture.supplyAsync(() -> chatClient.prompt()
                             .system(system)
                             .user(user)
                             .call()
-                            .content(), executor)
+                            .content(), callExecutor)
                     .get(timeoutSeconds, TimeUnit.SECONDS);
             JsonNode node = parseJson(raw);
             if (node == null) throw new IllegalStateException("模型没有返回有效 JSON");
