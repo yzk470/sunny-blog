@@ -108,6 +108,9 @@ public class RagService {
     public synchronized void deleteDatabase(String id) {
         RagDatabase db = getDatabase(id);
         if (db == null) return;
+        for (RagFile file : db.getFiles()) {
+            redis.removeFileSet(file.getId());
+        }
         redis.clearDatabase(id);
         Path dir = root().resolve(id);
         try (Stream<Path> stream = Files.walk(dir)) {
@@ -140,6 +143,7 @@ public class RagService {
         ragFile.setStoredName(safeName);
         ragFile.setSize(file.getSize());
         ragFile.setStrategy(strategy.name().toLowerCase(Locale.ROOT));
+        ragFile.setType(extensionOf(safeName));
         ragFile.setCreatedAt(Instant.now().toString());
         try {
             Files.createDirectories(fileDir);
@@ -327,5 +331,10 @@ public class RagService {
 
     private String clip(String text, int max) {
         return text.length() <= max ? text : text.substring(0, max) + "…";
+    }
+
+    private String extensionOf(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot < 0 ? "file" : name.substring(dot + 1).toUpperCase(Locale.ROOT);
     }
 }
