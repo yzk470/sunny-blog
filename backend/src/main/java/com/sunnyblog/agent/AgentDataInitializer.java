@@ -19,6 +19,7 @@ public class AgentDataInitializer {
         try {
             Path root = Path.of(properties.getDir()).toAbsolutePath().normalize();
             Files.createDirectories(root.resolve("workspace/scripts"));
+            Files.createDirectories(root.resolve("artifacts"));
             Files.createDirectories(root.resolve("skills"));
             Files.createDirectories(root.resolve("sessions"));
             Files.createDirectories(root.resolve("runs"));

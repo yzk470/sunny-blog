@@ -50,6 +50,14 @@ export interface AgentRun {
   steps: AgentRunStep[]
 }
 
+export interface AgentArtifact {
+  name: string
+  path: string
+  type: string
+  size: number
+  url: string
+}
+
 export interface AgentStreamHandlers {
   onEvent?: (type: string, message: string, detail: string) => void
   onDone?: () => void

@@ -4,15 +4,22 @@ import com.sunnyblog.common.ApiResponse;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +37,7 @@ public class AgentController {
     private final AgentSkillsService skills;
     private final AgentLlmService llm;
     private final AgentProperties properties;
+    private final AgentArtifactService artifacts;
     private final ExecutorService executor = Executors.newFixedThreadPool(3);
 
     public record ChatRequest(String sessionId, String message, String mode) {
@@ -64,6 +72,32 @@ public class AgentController {
                 "title", session.getTitle(),
                 "memories", session.getMemories()
         ));
+    }
+
+    @GetMapping("/artifacts/list")
+    public ApiResponse<List<AgentArtifactService.Artifact>> artifacts() {
+        return ApiResponse.ok(artifacts.list());
+    }
+
+    @GetMapping("/artifacts")
+    public ResponseEntity<Resource> artifact(@RequestParam String path,
+                                             @RequestParam(defaultValue = "false") boolean download) {
+        try {
+            Path file = artifacts.resolve(path);
+            if (!Files.isRegularFile(file)) return ResponseEntity.notFound().build();
+            String type = Files.probeContentType(file);
+            if (type == null) type = "application/octet-stream";
+            boolean inline = !download && (type.startsWith("image/") || type.equals("application/pdf"));
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType(type));
+            headers.setContentLength(Files.size(file));
+            headers.set(HttpHeaders.CONTENT_DISPOSITION,
+                    (inline ? "inline" : "attachment") + "; filename*=UTF-8''"
+                            + java.net.URLEncoder.encode(file.getFileName().toString(), java.nio.charset.StandardCharsets.UTF_8));
+            return ResponseEntity.ok().headers(headers).body(new FileSystemResource(file));
+        } catch (Exception ex) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

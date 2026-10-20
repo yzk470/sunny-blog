@@ -5,6 +5,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -17,6 +19,7 @@ public class AgentOrchestrator {
     private final AgentRunService runs;
     private final AgentReActService react;
     private final AgentPlanExecuteService planExecute;
+    private final AgentArtifactService artifacts;
 
     public record Result(String sessionId, String runId, String mode, String answer, String validation) {
     }
@@ -30,6 +33,7 @@ public class AgentOrchestrator {
         AgentMemoryService.Session session = memory.getOrCreate(sessionId);
         String mode = resolveMode(question, requestedMode);
         AgentRunService.AgentRun run = runs.create(session.getId(), question, mode);
+        Instant started = Instant.now();
         events.accept(new AgentEvent("session", session.getId(), run.getId()));
         events.accept(new AgentEvent("status", "正在读取记忆与技能…", ""));
 
@@ -41,12 +45,13 @@ public class AgentOrchestrator {
         try {
             if ("plan".equals(mode)) {
                 events.accept(new AgentEvent("status", "识别为长任务，进入 plan-and-execute…", ""));
-                answer = planExecute.run(question, memoryContext, run, events);
+                answer = planExecute.run(question, memoryContext, run, events, started);
                 validation = "独立验收已包含在计划执行流程中";
             } else {
                 events.accept(new AgentEvent("status", "识别为短任务，进入 ReAct 循环…", ""));
                 answer = react.run(question, memoryContext, run, events, 8);
-                Validation result = validate(question, answer);
+                String artifactManifest = artifacts.manifestSince(started);
+                Validation result = validate(question, answer, artifactManifest);
                 validation = result.reason;
                 runs.addStep(run, "VALIDATION", result.passed ? "独立验收通过" : "独立验收未通过",
                         result.reason, result.passed);
@@ -65,7 +70,7 @@ public class AgentOrchestrator {
                             请不要辩解，直接修正并重新完成任务。
                             """.formatted(question, answer, result.reason),
                             memoryContext, run, events, 6);
-                    Validation second = validate(question, revised);
+                    Validation second = validate(question, revised, artifacts.manifestSince(started));
                     validation = second.reason;
                     runs.addStep(run, "VALIDATION", second.passed ? "复审通过" : "复审未通过",
                             second.reason, second.passed);
@@ -86,6 +91,10 @@ public class AgentOrchestrator {
         }
 
         String finalAnswer = answer == null || answer.isBlank() ? "任务已结束，但没有生成有效回答。" : answer;
+        List<AgentArtifactService.Artifact> produced = artifacts.listSince(started);
+        events.accept(new AgentEvent("artifacts",
+                produced.isEmpty() ? "本轮没有生成文件产物" : "生成了 " + produced.size() + " 个文件",
+                artifacts.json(produced)));
         memory.append(session.getId(), "assistant", finalAnswer, "MEDIUM", "answer");
         runs.finish(run, finalAnswer, "DONE", validation);
         events.accept(new AgentEvent("answer", finalAnswer, validation));
@@ -94,16 +103,20 @@ public class AgentOrchestrator {
     }
 
     /**
-     * A separate validator call. It receives only the task and candidate answer,
-     * deliberately excluding the executor's thoughts and tool trace.
+     * A separate validator call. It receives only the task, candidate answer and
+     * the artifact manifest, deliberately excluding the executor's thoughts and
+     * tool trace.
      */
-    public Validation validate(String task, String answer) {
+    public Validation validate(String task, String answer, String artifactManifest) {
         String system = """
-                你是独立验收员。你只能看到用户任务和候选结果，看不到执行者的思考过程。
+                你是独立验收员。你只能看到用户任务、候选结果和产物目录清单，看不到执行者的思考过程。
                 判断结果是否真正完成任务；如果只是声称做了、空泛、遗漏关键产物、或答非所问，就不通过。
+                如果任务要求生成文件（pptx/docx/xlsx/pdf/html/图片等），产物清单中必须有对应文件；
+                只有文字说明而没有产物时，不能通过。
                 只输出 JSON：{"passed":true/false,"reason":"一句中文理由"}。
                 """;
-        String user = "用户任务：\n" + task + "\n\n候选结果：\n" + answer;
+        String user = "用户任务：\n" + task + "\n\n候选结果：\n" + answer
+                + "\n\n产物清单：\n" + (artifactManifest == null ? "无" : artifactManifest);
         try {
             JsonNode json = llm.completeJson(system, user, 45);
             boolean passed = json.path("passed").asBoolean(false);

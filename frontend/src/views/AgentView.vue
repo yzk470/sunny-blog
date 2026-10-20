@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { agentApi, type AgentMemory, type AgentSkill, type AgentStatus } from '@/api/agent'
+import { agentApi, type AgentArtifact, type AgentMemory, type AgentSkill, type AgentStatus } from '@/api/agent'
 
 type ActivityKind = 'status' | 'thought' | 'tool' | 'plan' | 'validation'
 
@@ -16,6 +16,7 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   activities: Activity[]
+  artifacts: AgentArtifact[]
   validation?: string
   failed?: boolean
   streaming?: boolean
@@ -70,6 +71,7 @@ function fromMemory(memory: AgentMemory): ChatMessage {
     role: memory.role === 'user' ? 'user' : 'assistant',
     content: memory.content,
     activities: [],
+    artifacts: [],
     failed: memory.kind === 'error',
   }
 }
@@ -80,6 +82,7 @@ function newAssistant(): ChatMessage {
     role: 'assistant',
     content: '',
     activities: [],
+    artifacts: [],
     streaming: true,
   }
 }
@@ -108,6 +111,7 @@ async function send(text?: string) {
     role: 'user',
     content: question,
     activities: [],
+    artifacts: [],
   })
   const assistant = newAssistant()
   messages.value.push(assistant)
@@ -136,6 +140,12 @@ async function send(text?: string) {
           else if (type === 'validation') {
             assistant.validation = detail || message
             activity('validation', message, detail)
+          } else if (type === 'artifacts') {
+            try {
+              assistant.artifacts = JSON.parse(detail || '[]') as AgentArtifact[]
+            } catch {
+              assistant.artifacts = []
+            }
           } else if (type === 'answer') {
             assistant.content = message || assistant.content
             assistant.streaming = false
@@ -200,6 +210,24 @@ function modeLabel(value: string) {
 
 function initial(name: string) {
   return name.slice(0, 1)
+}
+
+function artifactIcon(type: string) {
+  if (type === 'pptx') return '◫'
+  if (type === 'docx') return '¶'
+  if (type === 'xlsx' || type === 'csv') return '▦'
+  if (type === 'html') return '</>'
+  if (type === 'pdf') return 'PDF'
+  if (type === 'image') return '▧'
+  if (type === 'markdown' || type === 'text') return '≡'
+  return '↓'
+}
+
+function formatSize(size: number) {
+  if (!size) return '0 B'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 </script>
 
@@ -276,6 +304,26 @@ function initial(name: string) {
                 </summary>
                 <pre v-if="item.detail">{{ item.detail }}</pre>
               </details>
+            </div>
+
+            <div v-if="message.artifacts.length" class="agent-artifacts">
+              <a
+                v-for="artifact in message.artifacts"
+                :key="artifact.path"
+                class="agent-artifact"
+                :href="`${artifact.url}&download=1`"
+                :download="artifact.name"
+              >
+                <span v-if="artifact.type === 'image'" class="agent-artifact-preview">
+                  <img :src="artifact.url" :alt="artifact.name" loading="lazy" />
+                </span>
+                <span v-else class="agent-artifact-icon">{{ artifactIcon(artifact.type) }}</span>
+                <span class="agent-artifact-copy">
+                  <strong>{{ artifact.name }}</strong>
+                  <small>{{ artifact.type.toUpperCase() }} · {{ formatSize(artifact.size) }}</small>
+                </span>
+                <span class="agent-artifact-download">↓</span>
+              </a>
             </div>
 
             <div v-if="message.content" class="agent-bubble" :class="{ failed: message.failed }">
@@ -400,6 +448,16 @@ function initial(name: string) {
 @keyframes typing { 0%, 70%, 100% { opacity: 0.3; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-2px); } }
 @keyframes blink { 50% { opacity: 0; } }
 .agent-validation { margin: 5px 0 0; color: #7e8c98; font-size: 10.5px; }
+.agent-artifacts { display: flex; flex-wrap: wrap; gap: 7px; margin: 7px 0; }
+.agent-artifact { display: flex; align-items: center; gap: 8px; min-width: 150px; max-width: 260px; padding: 7px 9px; border: 1px solid rgba(98, 122, 143, 0.18); border-radius: 10px; background: #fff; color: #4b6174; text-decoration: none; transition: 0.16s ease; }
+.agent-artifact:hover { border-color: rgba(54, 91, 121, 0.42); box-shadow: 0 4px 12px rgba(60, 80, 98, 0.1); transform: translateY(-1px); }
+.agent-artifact-icon { display: grid; place-items: center; flex: 0 0 auto; width: 29px; height: 29px; border-radius: 7px; background: #edf2f6; color: #57738b; font-size: 10px; font-weight: 700; }
+.agent-artifact-preview { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 7px; overflow: hidden; background: #eef2f5; }
+.agent-artifact-preview img { width: 100%; height: 100%; object-fit: cover; }
+.agent-artifact-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.agent-artifact-copy strong { color: #42596d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-artifact-copy small { color: #98a3ad; font-size: 9.5px; }
+.agent-artifact-download { flex: 0 0 auto; color: #6d879b; font-size: 14px; }
 .agent-composer { flex: 0 0 auto; padding: 13px 28px 17px; border-top: 1px solid rgba(121, 139, 158, 0.14); background: rgba(255, 253, 248, 0.92); }
 .agent-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
 .agent-modes { display: flex; gap: 4px; padding: 3px; border-radius: 9px; background: #eef1f4; }

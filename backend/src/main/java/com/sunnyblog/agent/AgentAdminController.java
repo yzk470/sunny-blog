@@ -37,6 +37,17 @@ public class AgentAdminController {
                 request.description(), request.content()));
     }
 
+    @PostMapping("/skills/zip")
+    public ApiResponse<AgentSkillsService.Skill> uploadZip(@RequestParam("file") MultipartFile file) {
+        try {
+            String filename = file.getOriginalFilename() == null ? "skill" : file.getOriginalFilename();
+            String fallback = filename.replaceAll("\\.zip$", "");
+            return ApiResponse.ok(skills.importZip(file.getBytes(), fallback));
+        } catch (Exception ex) {
+            return ApiResponse.fail(500, "导入技能目录失败: " + ex.getMessage());
+        }
+    }
+
     @PostMapping("/skills/upload")
     public ApiResponse<AgentSkillsService.Skill> upload(@RequestParam("file") MultipartFile file,
                                                          @RequestParam(value = "name", required = false) String name,

@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.time.Instant;
 
 /**
  * Long tasks use a LangGraph4j state graph:
@@ -32,9 +33,10 @@ public class AgentPlanExecuteService {
     private final AgentReActService react;
     private final AgentRunService runs;
     private final AgentProperties properties;
+    private final AgentArtifactService artifacts;
 
     public String run(String task, String memoryContext, AgentRunService.AgentRun run,
-                      Consumer<AgentEvent> events) {
+                      Consumer<AgentEvent> events, Instant since) {
         try {
             Map<String, Channel<?>> channels = new HashMap<>();
             channels.put("task", Channels.base(() -> ""));
@@ -77,7 +79,7 @@ public class AgentPlanExecuteService {
             graph.addNode("execute", executeAction);
             AsyncNodeAction<AgentState> validateAction = state -> {
                 String answer = state.value("answer", "");
-                Validation validation = validate(task, answer);
+                Validation validation = validate(task, answer, artifacts.manifestSince(since));
                 runs.addStep(run, "VALIDATION", validation.passed ? "验收通过" : "验收未通过",
                         validation.reason, validation.passed);
                 events.accept(new AgentEvent("validation",
@@ -142,7 +144,8 @@ public class AgentPlanExecuteService {
         String system = """
                 你是任务规划器。把一个长任务拆成 2～6 个可执行步骤。
                 每一步都应当有明确产物，优先使用 agent 的文件/脚本/skill 工具。
-                所有路径必须相对于 workspace；脚本写在 workspace/scripts 下，用 run_script 执行。
+                所有路径必须相对于 workspace/skills/artifacts；脚本写在 workspace/scripts 下，用 run_script 执行。
+                用户要 PPT/Word/Excel/PDF/HTML/图片时，最后必须有真实产物文件写入 artifacts。
                 不允许规划 /tmp、绝对路径或直接访问系统文件。
                 只输出 JSON：{"steps":["步骤1","步骤2"],"reason":"一句理由"}。
                 """;
@@ -163,13 +166,15 @@ public class AgentPlanExecuteService {
         return Map.of("plan", steps);
     }
 
-    private Validation validate(String task, String answer) {
+    private Validation validate(String task, String answer, String artifactManifest) {
         String system = """
-                你是独立验收员，只能看到任务和候选结果，不能看到执行者的思考或工具记录。
-                判断候选结果是否真正完成用户任务，是否存在空泛、遗漏、未执行却声称执行等问题。
+                你是独立验收员，只能看到任务、候选结果和产物清单，不能看到执行者的思考或工具记录。
+                判断候选结果是否真正完成用户任务；如果只是声称做了、空泛、遗漏关键产物、或答非所问，就不通过。
+                如果任务要求生成文件，产物清单中必须有对应文件；只有文字说明时不能通过。
                 只输出 JSON：{"passed":true/false,"reason":"一句中文理由"}。
                 """;
-        String user = "任务：\n" + task + "\n\n候选结果：\n" + answer;
+        String user = "任务：\n" + task + "\n\n候选结果：\n" + answer
+                + "\n\n产物清单：\n" + artifactManifest;
         try {
             JsonNode json = llm.completeJson(system, user, 45);
             boolean passed = json.path("passed").asBoolean(false);

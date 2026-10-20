@@ -50,6 +50,10 @@ public class AgentFileTools {
         return root("skills");
     }
 
+    public Path artifactsRoot() {
+        return root("artifacts");
+    }
+
     private Path root(String name) {
         Path path = Path.of(properties.getDir()).toAbsolutePath().normalize().resolve(name);
         try {
@@ -116,26 +120,51 @@ public class AgentFileTools {
         }
     }
 
-    public ToolResult runScript(String relative) {
+    public ToolResult runScript(String scope, String relative, String extraArgs) {
         if (!properties.isExecutionEnabled()) {
             return ToolResult.fail("服务器已关闭脚本执行（AGENT_EXECUTION_ENABLED=false）");
         }
         try {
-            Path path = resolve("workspace", relative);
+            Path root = rootFor(scope);
+            Path path = resolve(scope, relative);
             if (!Files.exists(path) || Files.isDirectory(path)) return ToolResult.fail("脚本不存在: " + relative);
             String lower = path.getFileName().toString().toLowerCase();
             List<String> command = new ArrayList<>();
             if (lower.endsWith(".py")) command.add(python());
             else if (lower.endsWith(".js") || lower.endsWith(".mjs")) command.add("node");
             else return ToolResult.fail("只支持 .py / .js / .mjs 脚本");
-            command.add(path.getFileName().toString());
-            return execute(command, path.getParent());
+            Path cwd;
+            if ("skills".equalsIgnoreCase(scope)) {
+                String relativePath = root.relativize(path).toString().replace('\\', '/');
+                int slash = relativePath.indexOf('/');
+                Path skillDir = slash > 0 ? root.resolve(relativePath.substring(0, slash)) : root;
+                command.add(skillDir.relativize(path).toString().replace('\\', '/'));
+                cwd = skillDir;
+            } else if ("artifacts".equalsIgnoreCase(scope)) {
+                return ToolResult.fail("产物目录不能作为脚本目录");
+            } else {
+                command.add(root.relativize(path).toString().replace('\\', '/'));
+                cwd = root;
+            }
+            if (extraArgs != null && !extraArgs.isBlank()) {
+                for (String arg : extraArgs.trim().split("\\s+")) {
+                    if (arg.startsWith("/") || arg.contains("..")) {
+                        return ToolResult.fail("脚本参数只允许使用相对路径");
+                    }
+                    command.add(arg);
+                }
+            }
+            return execute(command, cwd);
         } catch (Exception ex) {
             return ToolResult.fail(ex.getMessage());
         }
     }
 
-    public ToolResult runCommand(String rawCommand) {
+    public ToolResult runScript(String relative) {
+        return runScript("workspace", relative, "");
+    }
+
+    public ToolResult runCommand(String scope, String rawCommand) {
         if (!properties.isExecutionEnabled()) {
             return ToolResult.fail("服务器已关闭命令执行（AGENT_EXECUTION_ENABLED=false）");
         }
@@ -154,11 +183,15 @@ public class AgentFileTools {
                 return ToolResult.fail("不允许内联代码参数，请先写入 scripts/ 下的脚本再执行");
             }
             if (token.startsWith("/") || token.contains("..")) {
-                return ToolResult.fail("只允许访问 workspace 内的相对路径");
+                return ToolResult.fail("只允许访问 workspace/skills 内的相对路径");
             }
             command.add(token);
         }
-        return execute(command, workspaceRoot());
+        return execute(command, rootFor(scope));
+    }
+
+    public ToolResult runCommand(String rawCommand) {
+        return runCommand("workspace", rawCommand);
     }
 
     private ToolResult execute(List<String> command, Path cwd) {
@@ -169,6 +202,9 @@ public class AgentFileTools {
             builder.redirectErrorStream(true);
             builder.environment().remove("DEEPSEEK_API_KEY");
             builder.environment().remove("OPENAI_API_KEY");
+            builder.environment().put("AGENT_WORKSPACE_DIR", workspaceRoot().toString());
+            builder.environment().put("AGENT_SKILLS_DIR", skillsRoot().toString());
+            builder.environment().put("AGENT_ARTIFACTS_DIR", artifactsRoot().toString());
             Process process = builder.start();
             process.getOutputStream().close();
             CompletableFuture<byte[]> outputFuture = CompletableFuture.supplyAsync(() -> {
@@ -199,12 +235,17 @@ public class AgentFileTools {
     }
 
     private Path resolve(String scope, String relative) {
-        Path root = scope != null && scope.equalsIgnoreCase("skills") ? skillsRoot() : workspaceRoot();
+        Path root = rootFor(scope);
         if (relative == null) relative = "";
         Path path = root.resolve(relative).normalize();
         if (!path.startsWith(root)) throw new IllegalArgumentException("非法路径: " + relative);
-        if (path.equals(root)) return root;
         return path;
+    }
+
+    private Path rootFor(String scope) {
+        if ("skills".equalsIgnoreCase(scope)) return skillsRoot();
+        if ("artifacts".equalsIgnoreCase(scope)) return artifactsRoot();
+        return workspaceRoot();
     }
 
     private String python() {

@@ -13,6 +13,7 @@ const name = ref('')
 const description = ref('')
 const content = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+const zipInput = ref<HTMLInputElement | null>(null)
 
 async function load() {
   loading.value = true
@@ -71,6 +72,30 @@ async function remove(skill: AgentSkill) {
     await load()
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '删除失败', 'error')
+  }
+}
+
+async function importZip(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const form = new FormData()
+  form.append('file', file)
+  try {
+    const token = localStorage.getItem(TOKEN_KEY)
+    const response = await fetch('/api/admin/agent/skills/zip', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    })
+    const body = await response.json()
+    if (!response.ok || body.code !== 0) throw new Error(body.message || '导入失败')
+    toast.show('技能目录已导入')
+    resetForm()
+    await load()
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : '导入失败', 'error')
+  } finally {
+    if (zipInput.value) zipInput.value.value = ''
   }
 }
 
@@ -161,9 +186,11 @@ onMounted(load)
             {{ saving ? '保存中…' : editingSlug ? '保存修改' : '创建技能' }}
           </button>
           <button type="button" class="btn btn-ghost" @click="fileInput?.click()">导入 SKILL.md</button>
+          <button type="button" class="btn btn-ghost" @click="zipInput?.click()">导入技能目录 .zip</button>
           <input ref="fileInput" type="file" accept=".md,text/markdown,text/plain" hidden @change="importFile" />
+          <input ref="zipInput" type="file" accept=".zip,application/zip" hidden @change="importZip" />
         </div>
-        <p class="skill-note">Agent 也可以在任务中自己修改 skills 目录来优化技能，后台会显示最新内容。</p>
+        <p class="skill-note">技能目录可包含 SKILL.md、参考 markdown、scripts 和资源文件；打包为 zip 导入即可。只有单个 SKILL.md 的技能也兼容。</p>
       </section>
     </div>
   </div>
