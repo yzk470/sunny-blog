@@ -24,15 +24,40 @@ public class AgentReActService {
     private final ObjectMapper objectMapper;
 
     public String run(String task, String memoryContext, AgentRunService.AgentRun run,
-                      Consumer<AgentEvent> events, int maxSteps) {
-        StringBuilder observations = new StringBuilder();
-        String lastAnswer = null;
-        boolean executionSucceeded = false;
-        boolean lastToolFailed = false;
-        String lastExecutionOutput = "";
-        Map<String, Integer> actionCounts = new HashMap<>();
+                      AgentRunService.ReActState state, Consumer<AgentEvent> events, int maxSteps) {
+        if (state == null) state = new AgentRunService.ReActState();
+        if (state.getLastAnswer() != null && !state.getLastAnswer().isBlank()) return state.getLastAnswer();
+        StringBuilder observations = new StringBuilder(state.getObservations() == null ? "" : state.getObservations());
+        String lastAnswer = state.getLastAnswer();
+        boolean executionSucceeded = state.isExecutionSucceeded();
+        boolean lastToolFailed = state.isLastToolFailed();
+        String lastExecutionOutput = state.getLastExecutionOutput() == null ? "" : state.getLastExecutionOutput();
+        Map<String, Integer> actionCounts = state.getActionCounts() == null
+                ? new HashMap<>() : new HashMap<>(state.getActionCounts());
+        if (state.getTools() == null) state.setTools(new java.util.ArrayList<>());
         int limit = Math.max(1, maxSteps);
-        for (int step = 0; step < limit; step++) {
+
+        if (state.getPending() != null) {
+            observations.append("\n## 断点恢复\n")
+                    .append("上次工具 ").append(state.getPending().getAction())
+                    .append(" 执行到一半时连接/服务中断，结果未知。系统没有自动重复执行，请先用只读工具确认现场，再决定下一步。\n");
+            state.setPending(null);
+            state.setStep(state.getStep() + 1);
+            state.setObservations(observations.toString());
+            runs.checkpoint(run);
+        }
+
+        for (int step = state.getStep(); step < limit; step++) {
+            if ("CANCEL_REQUESTED".equals(run.getStatus())) {
+                String paused = "任务已按请求暂停，当前进度已写入 checkpoint。";
+                state.setLastAnswer(paused);
+                state.setObservations(observations.toString());
+                runs.checkpoint(run);
+                return paused;
+            }
+            state.setStep(step);
+            state.setObservations(observations.toString());
+            runs.checkpoint(run);
             int remaining = limit - step - 1;
             String user = """
                     %s
@@ -86,9 +111,17 @@ public class AgentReActService {
                     observations.append("\n## 系统拦截\n").append(warning).append("\n");
                     record(run, "ERROR", "工具调用格式错误", warning, false);
                     events.accept(new AgentEvent("status", "工具调用格式错误，要求重新输出…", warning));
+                    state.setStep(step + 1);
+                    state.setObservations(observations.toString());
+                    state.setActionCounts(actionCounts);
+                    runs.checkpoint(run);
                     continue;
                 }
                 lastAnswer = raw;
+                state.setLastAnswer(raw);
+                state.setObservations(observations.toString());
+                state.setActionCounts(actionCounts);
+                runs.checkpoint(run);
                 record(run, "THOUGHT", "模型直接给出回答", raw, true);
                 events.accept(new AgentEvent("thought", raw, ""));
                 return raw;
@@ -110,6 +143,10 @@ public class AgentReActService {
                     String warning = "上一步工具调用失败，不能直接结束。请读取 ERROR，修复路径或代码后重试。";
                     observations.append("\n## 系统拦截\n").append(warning).append("\n");
                     events.accept(new AgentEvent("status", "工具失败后不允许直接结束，要求继续修复…", warning));
+                    state.setStep(step + 1);
+                    state.setObservations(observations.toString());
+                    state.setActionCounts(actionCounts);
+                    runs.checkpoint(run);
                     continue;
                 }
                 if (taskRequiresExecution(task) && !executionSucceeded) {
@@ -117,14 +154,25 @@ public class AgentReActService {
                             + "不能靠文字声称结果；请把脚本写到 scripts/，用 run_script 执行并读取输出后再结束。";
                     observations.append("\n## 系统拦截\n").append(warning).append("\n");
                     events.accept(new AgentEvent("status", "检测到尚未真实执行，要求继续执行…", warning));
+                    state.setStep(step + 1);
+                    state.setObservations(observations.toString());
+                    state.setActionCounts(actionCounts);
+                    runs.checkpoint(run);
                     continue;
                 }
                 lastAnswer = answer;
+                state.setLastAnswer(answer);
+                state.setStep(step + 1);
+                state.setObservations(observations.toString());
+                state.setActionCounts(actionCounts);
+                state.setExecutionSucceeded(executionSucceeded);
+                state.setLastToolFailed(lastToolFailed);
+                state.setLastExecutionOutput(lastExecutionOutput);
+                runs.checkpoint(run);
                 record(run, "FINAL", "生成最终回答", answer, true);
                 return answer;
             }
 
-            events.accept(new AgentEvent("tool_start", "调用工具 " + action, input.toString()));
             if (remaining == 0) {
                 String warning = "这是最后一步，系统不再执行新的工具调用。";
                 observations.append("\n## 系统拦截\n").append(warning).append("\n");
@@ -141,8 +189,27 @@ public class AgentReActService {
                 record(run, "ERROR", "重复动作被拦截", warning, false);
                 events.accept(new AgentEvent("status", "拦截重复工具调用，要求换一种动作…", warning));
                 lastToolFailed = true;
+                state.setStep(step + 1);
+                state.setLastToolFailed(true);
+                state.setObservations(observations.toString());
+                state.setActionCounts(actionCounts);
+                runs.checkpoint(run);
                 continue;
             }
+
+            AgentRunService.PendingTool pending = new AgentRunService.PendingTool();
+            pending.setAction(action);
+            pending.setInput(input.toString());
+            state.setPending(pending);
+            state.setStep(step);
+            state.setObservations(observations.toString());
+            state.setActionCounts(actionCounts);
+            state.setExecutionSucceeded(executionSucceeded);
+            state.setLastToolFailed(lastToolFailed);
+            state.setLastExecutionOutput(lastExecutionOutput);
+            runs.checkpoint(run);
+            events.accept(new AgentEvent("tool_start", "调用工具 " + action, input.toString()));
+
             AgentFileTools.ToolResult result;
             try {
                 result = tools.execute(action, input);
@@ -165,14 +232,40 @@ public class AgentReActService {
                 observations.append("执行已经成功。不要再写新的脚本版本；下一步必须 action=final，"
                         + "并把上面的真实输出作为最终回答。\n");
             }
+            AgentRunService.ToolRecord toolRecord = new AgentRunService.ToolRecord();
+            toolRecord.setAction(action);
+            toolRecord.setInput(input.toString());
+            toolRecord.setSuccess(result.success());
+            toolRecord.setOutput(result.output());
+            state.getTools().add(toolRecord);
+            state.setPending(null);
+            state.setStep(step + 1);
+            state.setObservations(observations.toString());
+            state.setActionCounts(actionCounts);
+            state.setExecutionSucceeded(executionSucceeded);
+            state.setLastToolFailed(lastToolFailed);
+            state.setLastExecutionOutput(lastExecutionOutput);
+            runs.checkpoint(run);
         }
         if (!lastExecutionOutput.isBlank()) {
             String summary = "任务已执行完成，工具真实输出如下：\n\n" + lastExecutionOutput;
+            state.setLastAnswer(summary);
+            state.setStep(limit);
+            state.setObservations(observations.toString());
+            state.setActionCounts(actionCounts);
+            state.setLastExecutionOutput(lastExecutionOutput);
+            state.setExecutionSucceeded(executionSucceeded);
+            runs.checkpoint(run);
             record(run, "FINAL", "执行成功但模型未收尾，系统整理输出", summary, true);
             return summary;
         }
         if (lastAnswer != null) return lastAnswer;
-        return "任务执行步数已达到上限，但没有得到最终回答。请缩小任务范围再试。";
+        String exhausted = "任务执行步数已达到上限，但没有得到最终回答。请缩小任务范围再试。";
+        state.setLastAnswer(exhausted);
+        state.setStep(limit);
+        state.setObservations(observations.toString());
+        runs.checkpoint(run);
+        return exhausted;
     }
 
     public String systemPrompt(int maxSteps) {

@@ -1,7 +1,6 @@
 package com.sunnyblog.agent;
 
 import com.sunnyblog.common.ApiResponse;
-import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.FileSystemResource;
@@ -20,11 +19,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 @Slf4j
 @RestController
@@ -33,19 +29,15 @@ import java.util.concurrent.Executors;
 public class AgentController {
 
     private final AgentOrchestrator orchestrator;
+    private final AgentTaskService tasks;
     private final AgentMemoryService memory;
     private final AgentSkillsService skills;
     private final AgentLlmService llm;
     private final AgentProperties properties;
     private final AgentArtifactService artifacts;
-    private final ExecutorService executor = Executors.newFixedThreadPool(3);
 
-    public record ChatRequest(String sessionId, String message, String mode, List<String> knowledgeBaseIds) {
-    }
-
-    @PreDestroy
-    public void shutdown() {
-        executor.shutdownNow();
+    public record ChatRequest(String sessionId, String clientTaskId, String message,
+                              String mode, List<String> knowledgeBaseIds) {
     }
 
     @GetMapping("/status")
@@ -102,40 +94,37 @@ public class AgentController {
 
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@RequestBody ChatRequest request) {
-        SseEmitter emitter = new SseEmitter(600_000L);
         String question = request.message() == null ? "" : request.message().trim();
         if (question.length() > 4000) question = question.substring(0, 4000);
-        final String safeQuestion = question;
-        emitter.onTimeout(emitter::complete);
-        emitter.onError(ex -> log.debug("Agent SSE disconnected: {}", ex.getMessage()));
-        executor.submit(() -> {
-            try {
-                orchestrator.chat(request.sessionId(), safeQuestion, request.mode(),
-                        request.knowledgeBaseIds(), event -> send(emitter, event));
-                emitter.complete();
-            } catch (Exception ex) {
-                log.warn("Agent chat failed: {}", ex.getMessage(), ex);
-                send(emitter, new AgentEvent("error", "执行失败", ex.getMessage()));
-                emitter.complete();
-            }
-        });
-        return emitter;
+        return tasks.start(request.sessionId(), request.clientTaskId(), question,
+                request.mode(), request.knowledgeBaseIds());
     }
 
-    private void send(SseEmitter emitter, AgentEvent event) {
-        try {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("message", event.message());
-            payload.put("detail", clip(event.detail()));
-            emitter.send(SseEmitter.event().name(event.type()).data(payload));
-        } catch (Exception ex) {
-            log.debug("Agent SSE send failed: {}", ex.getMessage());
-        }
+    @GetMapping("/tasks/{taskId}")
+    public ApiResponse<AgentTaskService.TaskView> task(@PathVariable String taskId) {
+        AgentTaskService.TaskView view = tasks.view(taskId);
+        return view == null ? ApiResponse.fail(404, "任务不存在") : ApiResponse.ok(view);
     }
 
-    private String clip(String detail) {
-        if (detail == null) return "";
-        int max = properties.getMaxOutputChars();
-        return detail.length() <= max ? detail : detail.substring(0, max) + "\n...[已截断]";
+    @GetMapping("/tasks/{taskId}/events")
+    public ApiResponse<List<AgentRunService.RunEvent>> taskEvents(@PathVariable String taskId,
+                                                                 @RequestParam(defaultValue = "0") long after) {
+        return ApiResponse.ok(tasks.events(taskId, after));
+    }
+
+    @GetMapping(value = "/tasks/{taskId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter taskStream(@PathVariable String taskId,
+                                 @RequestParam(defaultValue = "0") long after) {
+        return tasks.attach(taskId, after);
+    }
+
+    @PostMapping(value = "/tasks/{taskId}/resume", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter resume(@PathVariable String taskId) {
+        return tasks.resume(taskId);
+    }
+
+    @PostMapping("/tasks/{taskId}/cancel")
+    public ApiResponse<Boolean> cancel(@PathVariable String taskId) {
+        return ApiResponse.ok(tasks.cancel(taskId));
     }
 }

@@ -46,7 +46,7 @@ class AgentReActFormatTest {
         AgentRunService.AgentRun run = new AgentRunService.AgentRun();
         run.setId("test");
 
-        String answer = service.run("读取文件", "无历史", run, event -> { }, 4);
+        String answer = service.run("读取文件", "无历史", run, new AgentRunService.ReActState(), event -> { }, 4);
         assertEquals("完成", answer);
         verify(tools).execute(eq("read_file"), any());
     }

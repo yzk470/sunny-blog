@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
 import { agentApi, type AgentArtifact, type AgentMemory, type AgentSkill, type AgentStatus } from '@/api/agent'
 import { ragApi } from '@/api/rag'
 
@@ -26,6 +26,18 @@ interface ChatMessage {
 
 const SESSION_KEY = 'sunny_agent_session_v1'
 const MODE_KEY = 'sunny_agent_mode_v1'
+const ACTIVE_TASK_KEY = 'sunny_agent_active_task_v1'
+
+interface ActiveTask {
+  sessionId: string
+  clientTaskId: string
+  taskId?: string
+  question: string
+  mode: string
+  knowledgeBaseIds: string[]
+  lastSeq: number
+  assistantId: string
+}
 
 const status = ref<AgentStatus | null>(null)
 const skills = ref<AgentSkill[]>([])
@@ -37,7 +49,11 @@ const messages = ref<ChatMessage[]>([])
 const input = ref('')
 const busy = ref(false)
 const error = ref('')
+const activeTask = ref<ActiveTask | null>(readActiveTask())
+const reconnecting = ref(false)
+const needsResume = ref(false)
 const timelineRef = ref<HTMLElement | null>(null)
+let abortController: AbortController | null = null
 
 const canSend = computed(() => !busy.value && input.value.trim().length > 0 && status.value?.configured !== false)
 const suggestions = [
@@ -71,8 +87,180 @@ onMounted(async () => {
       sessionId.value = ''
     }
   }
+  await restoreActiveTask()
   await scrollBottom()
 })
+
+onBeforeUnmount(() => {
+  abortController?.abort()
+})
+
+function readActiveTask(): ActiveTask | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_TASK_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as ActiveTask
+    return parsed && parsed.clientTaskId && parsed.sessionId ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function saveActiveTask(task: ActiveTask | null) {
+  activeTask.value = task
+  if (!task) localStorage.removeItem(ACTIVE_TASK_KEY)
+  else localStorage.setItem(ACTIVE_TASK_KEY, JSON.stringify(task))
+}
+
+async function restoreActiveTask() {
+  const task = activeTask.value
+  if (!task || !task.taskId) {
+    if (task) saveActiveTask(null)
+    return
+  }
+  try {
+    const view = await agentApi.task(task.taskId)
+    if (view.status === 'DONE') {
+      saveActiveTask(null)
+      return
+    }
+    if (!sessionId.value) {
+      sessionId.value = view.sessionId
+      localStorage.setItem(SESSION_KEY, view.sessionId)
+    }
+    const assistant: ChatMessage = newAssistant()
+    assistant.taskId = task.taskId
+    const already = messages.value.some((m) => m.taskId === task.taskId)
+    if (!already) {
+      messages.value.push({
+        id: `user-${Date.now()}`,
+        role: 'user',
+        content: view.question,
+        activities: [],
+        artifacts: [],
+      })
+      messages.value.push(assistant)
+    } else {
+      const current = messages.value.find((m) => m.taskId === task.taskId)
+      if (current) Object.assign(current, assistant)
+    }
+    task.assistantId = messages.value[messages.value.length - 1]?.id || assistant.id
+    saveActiveTask(task)
+    needsResume.value = view.status !== 'RUNNING' && view.status !== 'PAUSED'
+    busy.value = true
+    await attachActive(assistant, task)
+  } catch {
+    saveActiveTask(null)
+    busy.value = false
+  }
+}
+
+async function attachActive(assistant: ChatMessage, task: ActiveTask) {
+  if (!task.taskId) return
+  reconnecting.value = true
+  try {
+    await agentApi.attach(task.taskId, task.lastSeq, streamHandlers(assistant, task))
+  } catch (ex) {
+    if (!assistant.content) assistant.content = ex instanceof Error ? ex.message : '连接失败'
+    assistant.failed = true
+    needsResume.value = true
+    reconnecting.value = false
+  } finally {
+    busy.value = false
+    assistant.streaming = false
+    reconnecting.value = false
+    await scrollBottom()
+  }
+}
+
+async function retryAttach(assistant: ChatMessage, task: ActiveTask) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 800 * Math.pow(2, attempt)))
+    try {
+      await agentApi.attach(task.taskId!, task.lastSeq, streamHandlers(assistant, task))
+      return
+    } catch {
+      reconnecting.value = true
+    }
+  }
+  assistant.failed = true
+  assistant.streaming = false
+  assistant.content ||= '连接已断开，任务仍在后台运行。刷新页面可以继续恢复。'
+  error.value = assistant.content
+  needsResume.value = true
+  reconnecting.value = false
+}
+
+function streamHandlers(assistant: ChatMessage, task: ActiveTask) {
+  return {
+    onEvent(type: string, message: string, detail: string, seq?: number) {
+      if (seq && seq > task.lastSeq) {
+        task.lastSeq = seq
+        saveActiveTask(task)
+      }
+      if (type === 'session') {
+        if (message) {
+          task.sessionId = message
+          if (!sessionId.value) {
+            sessionId.value = message
+            localStorage.setItem(SESSION_KEY, message)
+          }
+        }
+        if (detail) {
+          task.taskId = detail
+          assistant.taskId = detail
+          saveActiveTask(task)
+        }
+        return
+      }
+      applyEvent(assistant, type, message, detail)
+    },
+    onDone() {
+      assistant.streaming = false
+      if (needsResume.value) return
+      saveActiveTask(null)
+      busy.value = false
+    },
+    onError(message: string) {
+      assistant.streaming = false
+      assistant.failed = true
+      if (!assistant.content) assistant.content = message
+      error.value = message
+      needsResume.value = true
+      saveActiveTask(task)
+    },
+  }
+}
+
+function applyEvent(assistant: ChatMessage, type: string, message: string, detail: string) {
+  if (type === 'status') activity('status', message || '处理中…')
+  else if (type === 'thought') activity('thought', message)
+  else if (type === 'plan') activity('plan', message, detail)
+  else if (type === 'plan_step') activity('plan', message, detail)
+  else if (type === 'tool_start') activity('tool', message, detail)
+  else if (type === 'tool_end') activity('tool', message, detail)
+  else if (type === 'validation') {
+    assistant.validation = detail || message
+    activity('validation', message, detail)
+  } else if (type === 'artifacts') {
+    try {
+      assistant.artifacts = JSON.parse(detail || '[]') as AgentArtifact[]
+    } catch {
+      assistant.artifacts = []
+    }
+  } else if (type === 'answer') {
+    assistant.content = message || assistant.content
+    assistant.streaming = false
+  } else if (type === 'done') {
+    assistant.streaming = false
+  } else if (type === 'error') {
+    assistant.streaming = false
+    assistant.failed = true
+    assistant.content = message
+    error.value = message
+  }
+  void scrollBottom()
+}
 
 function fromMemory(memory: AgentMemory): ChatMessage {
   return {
@@ -124,71 +312,87 @@ async function send(text?: string) {
   })
   const assistant = newAssistant()
   messages.value.push(assistant)
+  const task: ActiveTask = {
+    sessionId: sessionId.value,
+    clientTaskId: crypto.randomUUID ? crypto.randomUUID() : `task-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    question,
+    mode: mode.value,
+    knowledgeBaseIds: [...selectedKbs.value],
+    lastSeq: 0,
+    assistantId: assistant.id,
+  }
+  saveActiveTask(task)
+  needsResume.value = false
   busy.value = true
   localStorage.setItem(MODE_KEY, mode.value)
   localStorage.setItem('sunny_agent_kbs_v1', JSON.stringify(selectedKbs.value))
   await scrollBottom()
+  abortController = new AbortController()
 
   try {
     await agentApi.stream(
-      { sessionId: sessionId.value, message: question, mode: mode.value, knowledgeBaseIds: selectedKbs.value },
       {
-        onEvent(type, message, detail) {
-          if (type === 'session') {
-            if (message && !sessionId.value) {
-              sessionId.value = message
-              localStorage.setItem(SESSION_KEY, message)
-            }
-            if (detail) assistant.taskId = detail
-            return
-          }
-          if (type === 'status') activity('status', message || '处理中…')
-          else if (type === 'thought') activity('thought', message)
-          else if (type === 'plan') activity('plan', message, detail)
-          else if (type === 'plan_step') activity('plan', message, detail)
-          else if (type === 'tool_start') activity('tool', message, detail)
-          else if (type === 'tool_end') activity('tool', message, detail)
-          else if (type === 'validation') {
-            assistant.validation = detail || message
-            activity('validation', message, detail)
-          } else if (type === 'artifacts') {
-            try {
-              assistant.artifacts = JSON.parse(detail || '[]') as AgentArtifact[]
-            } catch {
-              assistant.artifacts = []
-            }
-          } else if (type === 'answer') {
-            assistant.content = message || assistant.content
-            assistant.streaming = false
-          } else if (type === 'done') {
-            assistant.streaming = false
-          } else if (type === 'error') {
-            assistant.streaming = false
-            assistant.failed = true
-            assistant.content = error.value = message
-          }
-          void scrollBottom()
-        },
-        onDone() {
-          assistant.streaming = false
-        },
-        onError(message) {
-          assistant.streaming = false
-          assistant.failed = true
-          if (!assistant.content) assistant.content = message
-          error.value = message
-        },
+        sessionId: sessionId.value,
+        clientTaskId: task.clientTaskId,
+        message: question,
+        mode: mode.value,
+        knowledgeBaseIds: selectedKbs.value,
       },
+      streamHandlers(assistant, task),
+      abortController.signal,
     )
   } catch (ex) {
-    assistant.streaming = false
-    assistant.failed = true
-    if (!assistant.content) assistant.content = ex instanceof Error ? ex.message : '请求失败'
-    error.value = assistant.content
+    if (task.taskId && assistant.streaming) {
+      reconnecting.value = true
+      await retryAttach(assistant, task)
+    } else {
+      assistant.streaming = false
+      assistant.failed = true
+      if (!assistant.content) assistant.content = ex instanceof Error ? ex.message : '请求失败'
+      error.value = assistant.content
+      if (!task.taskId) saveActiveTask(null)
+      else needsResume.value = true
+    }
   } finally {
     busy.value = false
     assistant.streaming = false
+    reconnecting.value = false
     await scrollBottom()
+  }
+}
+
+async function resumeTask() {
+  const task = activeTask.value
+  if (!task?.taskId || busy.value) return
+  const assistant = messages.value.find((m) => m.id === task.assistantId)
+    || messages.value[messages.value.length - 1]
+  if (!assistant || assistant.role !== 'assistant') return
+  busy.value = true
+  needsResume.value = false
+  error.value = ''
+  assistant.failed = false
+  assistant.streaming = true
+  try {
+    await agentApi.resume(task.taskId, streamHandlers(assistant, task))
+  } catch (ex) {
+    assistant.streaming = false
+    assistant.failed = true
+    assistant.content ||= ex instanceof Error ? ex.message : '恢复失败'
+    error.value = assistant.content
+  } finally {
+    busy.value = false
+  }
+}
+
+async function cancelTask() {
+  const task = activeTask.value
+  if (!task?.taskId) return
+  try {
+    await agentApi.cancel(task.taskId)
+    needsResume.value = true
+    error.value = '已请求停止，等待当前步骤结束后可从断点继续。'
+  } catch (ex) {
+    error.value = ex instanceof Error ? ex.message : '停止失败'
   }
 }
 
@@ -201,6 +405,8 @@ async function scrollBottom() {
 function resetSession() {
   if (busy.value) return
   sessionId.value = ''
+  saveActiveTask(null)
+  needsResume.value = false
   localStorage.removeItem(SESSION_KEY)
   messages.value = []
   error.value = ''
@@ -268,6 +474,18 @@ function formatSize(size: number) {
       </div>
       <div v-else-if="status && !status.executionEnabled" class="agent-banner soft">
         脚本执行当前关闭（AGENT_EXECUTION_ENABLED=false），Agent 仍可分析和写作，但不能运行脚本。
+      </div>
+      <div v-if="reconnecting" class="agent-banner soft">
+        连接断开，任务仍在后台运行，正在从断点恢复…
+      </div>
+      <div v-else-if="activeTask && activeTask.taskId" class="agent-banner task-banner">
+        <span>
+          后台任务 {{ activeTask.taskId.slice(0, 8) }}
+          <template v-if="needsResume">已中断，可继续</template>
+          <template v-else>执行中</template>
+        </span>
+        <button v-if="needsResume" type="button" class="mini-btn" @click="resumeTask">继续任务</button>
+        <button v-else-if="busy" type="button" class="mini-btn" @click="cancelTask">停止</button>
       </div>
 
       <main ref="timelineRef" class="agent-timeline">
@@ -429,6 +647,8 @@ function formatSize(size: number) {
 .agent-reset { border: 0; background: transparent; color: #7a8795; font-size: 12px; cursor: pointer; }
 .agent-banner { margin: 14px 28px 0; padding: 10px 12px; border-radius: 10px; color: #8c5a42; background: #fbf0e5; font-size: 12px; }
 .agent-banner.soft { color: #6a7785; background: #eef2f5; }
+.agent-banner.task-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #526b80; background: #eef4f8; }
+.agent-banner .mini-btn { border: 1px solid rgba(88, 119, 145, 0.22); border-radius: 7px; padding: 4px 9px; background: #fff; color: #48657c; font-size: 11px; cursor: pointer; }
 .agent-timeline { flex: 1 1 auto; min-height: 420px; max-height: calc(100vh - 330px); overflow-y: auto; padding: 24px 28px; scrollbar-width: thin; scroll-behavior: smooth; }
 .agent-empty { max-width: 650px; margin: 52px auto; text-align: center; color: #5f6d7b; }
 .agent-orbit { display: grid; place-items: center; width: 58px; height: 58px; margin: 0 auto 16px; border-radius: 50%; background: #eef2f6; color: #45627e; font-size: 25px; }

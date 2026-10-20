@@ -3,26 +3,16 @@ package com.sunnyblog.agent;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.bsc.langgraph4j.CompiledGraph;
-import org.bsc.langgraph4j.StateGraph;
-import org.bsc.langgraph4j.action.AsyncEdgeAction;
-import org.bsc.langgraph4j.action.AsyncNodeAction;
-import org.bsc.langgraph4j.state.AgentState;
-import org.bsc.langgraph4j.state.Channel;
-import org.bsc.langgraph4j.state.Channels;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
-import java.time.Instant;
 
 /**
- * Long tasks use a LangGraph4j state graph:
- * plan -> execute all steps -> independent validate -> revise (at most once).
+ * Plan-and-execute with a durable checkpoint after every plan step.
+ * The graph is intentionally a small explicit state machine so it can resume
+ * from the exact plan index after a disconnect or server restart.
  */
 @Slf4j
 @Service
@@ -32,67 +22,105 @@ public class AgentPlanExecuteService {
     private final AgentLlmService llm;
     private final AgentReActService react;
     private final AgentRunService runs;
-    private final AgentProperties properties;
     private final AgentArtifactService artifacts;
 
     public String run(String task, String memoryContext, AgentRunService.AgentRun run,
-                      Consumer<AgentEvent> events, Instant since) {
-        try {
-            Map<String, Channel<?>> channels = new HashMap<>();
-            channels.put("task", Channels.base(() -> ""));
-            channels.put("plan", Channels.base(ArrayList::new));
-            channels.put("answer", Channels.base(() -> ""));
-            channels.put("stepResults", Channels.base(() -> ""));
-            channels.put("passed", Channels.base(() -> false));
-            channels.put("validation", Channels.base(() -> ""));
-            channels.put("revision", Channels.base(() -> 0));
-            StateGraph<AgentState> graph = new StateGraph<>(channels, AgentState::new);
-            AsyncNodeAction<AgentState> planAction = state ->
-                    CompletableFuture.completedFuture(planNode(task, memoryContext, run, events));
-            graph.addNode("plan", planAction);
-            AsyncNodeAction<AgentState> executeAction = state -> {
-                List<String> plan = stringList(state.data().get("plan"));
-                StringBuilder results = new StringBuilder();
-                String answer = "";
-                for (int i = 0; i < plan.size(); i++) {
-                    String step = plan.get(i);
-                    events.accept(new AgentEvent("plan_step", "执行计划 " + (i + 1) + "/" + plan.size(), step));
-                    runs.addStep(run, "PLAN_STEP", "计划步骤 " + (i + 1), step, true);
-                    String stepTask = """
-                            总任务：%s
+                      java.util.function.Consumer<AgentEvent> events) {
+        AgentRunService.Checkpoint checkpoint = run.getCheckpoint();
+        if (checkpoint == null) {
+            checkpoint = new AgentRunService.Checkpoint();
+            run.setCheckpoint(checkpoint);
+        }
+        AgentRunService.PlanState plan = checkpoint.getPlan();
+        if (plan == null) {
+            plan = new AgentRunService.PlanState();
+            checkpoint.setPlan(plan);
+        }
+        checkpoint.setPhase("plan");
 
-                            当前步骤（%d/%d）：%s
+        if (plan.getPlan().isEmpty()) {
+            Map<String, Object> planned = planNode(task, memoryContext, run, events);
+            @SuppressWarnings("unchecked")
+            List<String> steps = (List<String>) planned.get("plan");
+            plan.setPlan(new ArrayList<>(steps));
+            plan.setPlanIndex(0);
+            runs.checkpoint(run);
+        }
 
-                            只完成当前步骤，已完成的步骤结果如下：
-                            %s
-                            """.formatted(task, i + 1, plan.size(), step,
-                            results.length() == 0 ? "（无）" : results.toString());
-                    answer = react.run(stepTask, memoryContext, run, events, 6);
-                    results.append("\n[").append(i + 1).append("] ").append(step)
-                            .append("\n结果：").append(answer).append("\n");
-                }
-                return CompletableFuture.completedFuture(Map.<String, Object>of(
-                        "answer", answer,
-                        "stepResults", results.toString()
-                ));
-            };
-            graph.addNode("execute", executeAction);
-            AsyncNodeAction<AgentState> validateAction = state -> {
-                String answer = state.value("answer", "");
-                Validation validation = validate(task, answer, artifacts.manifestRun(run.getId()));
-                runs.addStep(run, "VALIDATION", validation.passed ? "验收通过" : "验收未通过",
-                        validation.reason, validation.passed);
-                events.accept(new AgentEvent("validation",
-                        validation.passed ? "独立验收通过" : "独立验收要求修改", validation.reason));
-                return CompletableFuture.completedFuture(Map.<String, Object>of(
-                        "passed", validation.passed,
-                        "validation", validation.reason
-                ));
-            };
-            graph.addNode("validate", validateAction);
-            AsyncNodeAction<AgentState> reviseAction = state -> {
-                int revision = (int) state.data().getOrDefault("revision", 0);
-                String feedback = state.value("validation", "");
+        if (plan.isRevisionInProgress() && plan.getCurrent() != null) {
+            String revised = react.run("""
+                    总任务：%s
+
+                    上一版结果：
+                    %s
+
+                    独立验收意见：
+                    %s
+
+                    请根据验收意见重新检查并修正结果。
+                    """.formatted(task, plan.getAnswer(), plan.getValidation()),
+                    memoryContext, run, plan.getCurrent(), events, 6);
+            plan.setCurrent(null);
+            plan.setAnswer(revised);
+            plan.setRevisionInProgress(false);
+            runs.checkpoint(run);
+            Validation second = validate(task, revised, artifacts.manifestRun(run.getId()));
+            plan.setValidation(second.reason);
+            plan.setPassed(second.passed);
+            runs.addStep(run, "VALIDATION", second.passed ? "复审通过" : "复审未通过",
+                    second.reason, second.passed);
+            events.accept(new AgentEvent("validation",
+                    second.passed ? "复审通过" : "复审仍有问题", second.reason));
+            runs.checkpoint(run);
+            return plan.getAnswer();
+        }
+
+        for (int i = plan.getPlanIndex(); i < plan.getPlan().size(); i++) {
+            if ("CANCEL_REQUESTED".equals(run.getStatus())) {
+                String paused = "任务已按请求暂停，当前计划进度已写入 checkpoint。";
+                plan.setAnswer(paused);
+                runs.checkpoint(run);
+                return paused;
+            }
+            String step = plan.getPlan().get(i);
+            if (plan.getCurrent() == null) {
+                plan.setCurrent(new AgentRunService.ReActState());
+            }
+            plan.setPlanIndex(i);
+            runs.checkpoint(run);
+            events.accept(new AgentEvent("plan_step", "执行计划 " + (i + 1) + "/" + plan.getPlan().size(), step));
+            runs.addStep(run, "PLAN_STEP", "计划步骤 " + (i + 1), step, true);
+            String stepTask = """
+                    总任务：%s
+
+                    当前步骤（%d/%d）：%s
+
+                    只完成当前步骤，已完成的步骤结果如下：
+                    %s
+                    """.formatted(task, i + 1, plan.getPlan().size(), step,
+                    plan.getResults().isBlank() ? "（无）" : plan.getResults());
+            String answer = react.run(stepTask, memoryContext, run, plan.getCurrent(), events, 6);
+            plan.setCurrent(null);
+            plan.setAnswer(answer);
+            plan.setResults(plan.getResults() + "\n[" + (i + 1) + "] " + step + "\n结果：" + answer + "\n");
+            plan.setPlanIndex(i + 1);
+            runs.checkpoint(run);
+        }
+
+        if (!plan.isPassed()) {
+            Validation validation = validate(task, plan.getAnswer(), artifacts.manifestRun(run.getId()));
+            plan.setValidation(validation.reason);
+            plan.setPassed(validation.passed);
+            runs.addStep(run, "VALIDATION", validation.passed ? "验收通过" : "验收未通过",
+                    validation.reason, validation.passed);
+            events.accept(new AgentEvent("validation",
+                    validation.passed ? "独立验收通过" : "独立验收要求修改", validation.reason));
+            runs.checkpoint(run);
+            if (!validation.passed && plan.getRevision() < 1) {
+                plan.setRevision(plan.getRevision() + 1);
+                plan.setRevisionInProgress(true);
+                plan.setCurrent(new AgentRunService.ReActState());
+                runs.checkpoint(run);
                 String revised = react.run("""
                         总任务：%s
 
@@ -103,43 +131,27 @@ public class AgentPlanExecuteService {
                         %s
 
                         请根据验收意见重新检查并修正结果。
-                        """.formatted(task, state.value("answer", ""), feedback),
-                        memoryContext, run, events, 6);
-                return CompletableFuture.completedFuture(Map.<String, Object>of(
-                        "answer", revised,
-                        "revision", revision + 1
-                ));
-            };
-            graph.addNode("revise", reviseAction);
-            AsyncNodeAction<AgentState> finishAction = state ->
-                    CompletableFuture.completedFuture(Map.<String, Object>of("answer", state.value("answer", "")));
-            graph.addNode("finish", finishAction);
-
-            graph.addEdge(StateGraph.START, "plan");
-            graph.addEdge("plan", "execute");
-            graph.addEdge("execute", "validate");
-            AsyncEdgeAction<AgentState> route = state -> {
-                boolean passed = state.value("passed", false);
-                int revision = (int) state.data().getOrDefault("revision", 0);
-                return CompletableFuture.completedFuture(passed || revision >= 1 ? "finish" : "revise");
-            };
-            graph.addConditionalEdges("validate", route, Map.of("finish", "finish", "revise", "revise"));
-            graph.addEdge("revise", "validate");
-            graph.addEdge("finish", StateGraph.END);
-
-            CompiledGraph<AgentState> compiled = graph.compile();
-            compiled.setMaxIterations(20);
-            AgentState finalState = compiled.invoke(Map.of("task", task)).orElseThrow();
-            return finalState.value("answer", "计划执行完成，但没有生成结果。");
-        } catch (Exception ex) {
-            log.warn("Plan-and-execute failed: {}", ex.getMessage(), ex);
-            runs.addStep(run, "ERROR", "计划执行失败", ex.getMessage(), false);
-            return "长任务执行失败：" + ex.getMessage();
+                        """.formatted(task, plan.getAnswer(), validation.reason),
+                        memoryContext, run, plan.getCurrent(), events, 6);
+                plan.setCurrent(null);
+                plan.setRevisionInProgress(false);
+                plan.setAnswer(revised);
+                Validation second = validate(task, revised, artifacts.manifestRun(run.getId()));
+                plan.setValidation(second.reason);
+                plan.setPassed(second.passed);
+                runs.addStep(run, "VALIDATION", second.passed ? "复审通过" : "复审未通过",
+                        second.reason, second.passed);
+                events.accept(new AgentEvent("validation",
+                        second.passed ? "复审通过" : "复审仍有问题", second.reason));
+                runs.checkpoint(run);
+            }
         }
+        return plan.getAnswer().isBlank() ? "计划执行完成，但没有生成结果。" : plan.getAnswer();
     }
 
     private Map<String, Object> planNode(String task, String memoryContext,
-                                         AgentRunService.AgentRun run, Consumer<AgentEvent> events) {
+                                         AgentRunService.AgentRun run,
+                                         java.util.function.Consumer<AgentEvent> events) {
         events.accept(new AgentEvent("status", "长任务：正在制定执行计划…", ""));
         String system = """
                 你是任务规划器。把一个长任务拆成 2～6 个可执行步骤。
@@ -184,14 +196,6 @@ public class AgentPlanExecuteService {
         } catch (Exception ex) {
             return new Validation(true, "验收模型不可用，跳过二次验收");
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<String> stringList(Object value) {
-        if (value instanceof List<?> list) {
-            return list.stream().map(String::valueOf).toList();
-        }
-        return List.of();
     }
 
     private record Validation(boolean passed, String reason) {

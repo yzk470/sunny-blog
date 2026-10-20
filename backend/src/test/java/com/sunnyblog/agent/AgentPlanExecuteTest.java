@@ -28,17 +28,17 @@ class AgentPlanExecuteTest {
             return mapper.readTree("{\"passed\":true,\"reason\":\"结果完整\"}");
         });
         AgentReActService react = mock(AgentReActService.class);
-        when(react.run(anyString(), anyString(), any(), any(), anyInt())).thenReturn("已生成结果");
+        when(react.run(anyString(), anyString(), any(), any(AgentRunService.ReActState.class), any(), anyInt()))
+                .thenReturn("已生成结果");
         AgentRunService runs = mock(AgentRunService.class);
-        AgentProperties properties = new AgentProperties();
         AgentArtifactService artifacts = mock(AgentArtifactService.class);
-        when(artifacts.manifestSince(any())).thenReturn("本轮没有新增产物文件。");
-        AgentPlanExecuteService service = new AgentPlanExecuteService(llm, react, runs, properties, artifacts);
+        when(artifacts.manifestRun(anyString())).thenReturn("本轮没有新增产物文件。");
+        AgentPlanExecuteService service = new AgentPlanExecuteService(llm, react, runs, artifacts);
 
         AgentRunService.AgentRun run = new AgentRunService.AgentRun();
         run.setId("test");
         AtomicInteger events = new AtomicInteger();
-        String result = service.run("完成一个长任务", "无历史", run, event -> events.incrementAndGet(), Instant.now());
+        String result = service.run("完成一个长任务", "无历史", run, event -> events.incrementAndGet());
 
         assertEquals("已生成结果", result);
         assertTrue(events.get() > 0);
