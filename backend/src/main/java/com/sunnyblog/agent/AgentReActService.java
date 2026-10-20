@@ -29,6 +29,7 @@ public class AgentReActService {
         String lastAnswer = null;
         boolean executionSucceeded = false;
         boolean lastToolFailed = false;
+        String lastExecutionOutput = "";
         Map<String, Integer> actionCounts = new HashMap<>();
         for (int step = 0; step < Math.max(1, maxSteps); step++) {
             String user = """
@@ -134,12 +135,21 @@ public class AgentReActService {
             lastToolFailed = !result.success();
             if (result.success() && (action.equals("run_script") || action.equals("run_command"))) {
                 executionSucceeded = true;
+                lastExecutionOutput = result.output();
             }
             observations.append("\n### ").append(action).append("\n")
                     .append(result.success() ? "OK: " : "ERROR: ").append(result.output()).append("\n");
             if (!result.success()) {
                 observations.append("请阅读错误并修复，不要重复同样的失败动作。\n");
+            } else if (executionSucceeded) {
+                observations.append("执行已经成功。不要再写新的脚本版本；下一步必须 action=final，"
+                        + "并把上面的真实输出作为最终回答。\n");
             }
+        }
+        if (!lastExecutionOutput.isBlank()) {
+            String summary = "任务已执行完成，工具真实输出如下：\n\n" + lastExecutionOutput;
+            record(run, "FINAL", "执行成功但模型未收尾，系统整理输出", summary, true);
+            return summary;
         }
         if (lastAnswer != null) return lastAnswer;
         return "任务执行步数已达到上限，但没有得到最终回答。请缩小任务范围再试。";
