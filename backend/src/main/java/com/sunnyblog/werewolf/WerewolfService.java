@@ -60,6 +60,28 @@ public class WerewolfService {
             synchronized (game) {
                 try {
                     attachAi(game);
+                    String humanId = game.humanPlayer().getId();
+                    game.setEventListener(new WerewolfGame.GameEventListener() {
+                        @Override
+                        public void onLog(WerewolfGame.LogEntry entry) {
+                            if (entry.privateTo() != null && !entry.privateTo().equals(humanId)) return;
+                            if ("speech".equals(entry.type())) return;
+                            sendQuietly(emitter, "log", new WerewolfGame.LogView(
+                                    entry.seq(), entry.round(), entry.phase(), entry.phaseLabel(),
+                                    entry.type(), entry.text(), entry.privateTo() != null
+                            ));
+                        }
+
+                        @Override
+                        public void onSnapshot(WerewolfGame.GameView view) {
+                            sendQuietly(emitter, "snapshot", view);
+                        }
+
+                        @Override
+                        public void onThinking(String text) {
+                            sendQuietly(emitter, "thinking", Map.of("text", text));
+                        }
+                    });
                     send(emitter, "thinking", Map.of("text", "AI 正在整理这一轮的局势…"));
                     String action = request.action() == null ? "ADVANCE" : request.action();
                     if ("AUTO".equals(action)) {
@@ -85,6 +107,7 @@ public class WerewolfService {
                     log.error("Werewolf stream failed", ex);
                     sendQuietly(emitter, "error", Map.of("message", "本回合处理失败，请继续下一步"));
                 } finally {
+                    game.setEventListener(null);
                     emitter.complete();
                 }
             }
@@ -110,6 +133,7 @@ public class WerewolfService {
                 sendQuietly(emitter, "state", game.toView());
                 return false;
             }
+            sendQuietly(emitter, "thinking", Map.of("text", speaker.getName() + " 正在组织语言…"));
             sendQuietly(emitter, "speech_start", Map.of(
                     "speakerId", speaker.getId(),
                     "speakerName", speaker.getName(),

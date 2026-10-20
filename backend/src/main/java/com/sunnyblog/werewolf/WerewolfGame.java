@@ -218,13 +218,45 @@ public class WerewolfGame {
         String chooseHunterShot(WerewolfGame game, Player hunter);
     }
 
+    /** Lets the SSE endpoint mirror every table event live, not only speeches. */
+    public interface GameEventListener {
+        void onLog(LogEntry entry);
+        void onSnapshot(GameView view);
+        void onThinking(String text);
+    }
+
     private DecisionProvider decisionProvider;
+    private GameEventListener eventListener;
     private final List<String> discussionQueue = new ArrayList<>();
     private final Set<String> discussionSpoken = new HashSet<>();
     private boolean discussionReady;
 
     public void setDecisionProvider(DecisionProvider decisionProvider) {
         this.decisionProvider = decisionProvider;
+    }
+
+    public void setEventListener(GameEventListener eventListener) {
+        this.eventListener = eventListener;
+    }
+
+    private void notifyThinking(String text) {
+        if (eventListener != null) {
+            try {
+                eventListener.onThinking(text);
+            } catch (Exception ignored) {
+                // stream closed
+            }
+        }
+    }
+
+    private void notifySnapshot() {
+        if (eventListener != null) {
+            try {
+                eventListener.onSnapshot(toView());
+            } catch (Exception ignored) {
+                // stream closed
+            }
+        }
     }
 
     public List<Player> allPlayers() {
@@ -354,6 +386,7 @@ public class WerewolfGame {
         discussionSpoken.clear();
         discussionReady = false;
         phase = Phase.VOTE;
+        notifySnapshot();
     }
 
     public void autoDiscussRemaining() {
@@ -466,6 +499,7 @@ public class WerewolfGame {
         humanVoteTarget = null;
         pendingHunterId = null;
         log(null, "night", "第 " + round + " 夜，天黑请闭眼。");
+        notifySnapshot();
     }
 
     private void doWolfPhase() {
@@ -482,8 +516,10 @@ public class WerewolfGame {
                 return;
             }
             waiting = new Waiting("WOLF_KILL", "狼人行动", "今晚要和狼队一起袭击谁？", options);
+            notifySnapshot();
             return;
         }
+        notifyThinking("狼人正在交换意见，判断今晚的袭击目标…");
         wolfTarget = chooseWolfTarget();
         Player victim = player(wolfTarget);
         if (victim != null) {
@@ -495,6 +531,7 @@ public class WerewolfGame {
             }
         }
         phase = Phase.NIGHT_WITCH_SAVE;
+        notifySnapshot();
     }
 
     private void doWitchSave() {
@@ -510,10 +547,11 @@ public class WerewolfGame {
             options.add(new Option("pass", "保留解药"));
             waiting = new Waiting("WITCH_SAVE", "女巫的解药",
                     "昨晚 " + victim.getName() + " 被狼人袭击。你要使用解药吗？", options);
+            notifySnapshot();
             return;
         }
-        boolean save = aiWitchSave(witch, victim);
-        if (save) {
+        notifyThinking("女巫正在判断是否使用解药…");
+        boolean save = aiWitchSave(witch, victim);        if (save) {
             witchSaveTarget = wolfTarget;
             witch.antidote = false;
             witchPotionUsedThisNight = true;
@@ -523,6 +561,7 @@ public class WerewolfGame {
             log(witch.getId(), "private", "你选择保留解药。");
         }
         phase = Phase.NIGHT_WITCH_POISON;
+        notifySnapshot();
     }
 
     private void doWitchPoison() {
@@ -539,8 +578,10 @@ public class WerewolfGame {
             options.add(new Option("pass", "不使用毒药"));
             waiting = new Waiting("WITCH_POISON", "女巫的毒药",
                     "你可以毒杀一名玩家，但每晚最多使用一瓶药。要使用毒药吗？", options);
+            notifySnapshot();
             return;
         }
+        notifyThinking("女巫正在判断是否使用毒药…");
         String target = aiWitchPoison(witch);
         if (target != null) {
             witchPoisonTarget = target;
@@ -550,6 +591,7 @@ public class WerewolfGame {
             log(null, "night", "空气中飘过一丝不易察觉的苦味。");
         }
         phase = Phase.NIGHT_SEER;
+        notifySnapshot();
     }
 
     private void doSeerCheck() {
@@ -565,8 +607,10 @@ public class WerewolfGame {
                     .toList();
             waiting = new Waiting("SEER_CHECK", "预言家的查验",
                     "选择一名玩家查验阵营。查验结果只有你能看到。", options);
+            notifySnapshot();
             return;
         }
+        notifyThinking("预言家正在选择今晚的查验目标…");
         Player target = chooseSeerCheck(seer);
         if (target != null) {
             seerChecks.put(target.getId(), target.getRole());
@@ -576,6 +620,7 @@ public class WerewolfGame {
                     + (target.getRole().isWerewolf() ? "狼人" : "好人") + "。");
         }
         phase = Phase.DAWN;
+        notifySnapshot();
     }
 
     private void doDawn() {
@@ -617,6 +662,7 @@ public class WerewolfGame {
 
         if (checkWin()) return;
         phase = Phase.DISCUSSION;
+        notifySnapshot();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -645,6 +691,7 @@ public class WerewolfGame {
                 .sorted(Comparator.comparingInt(Player::getSeat))
                 .forEach(p -> discussionQueue.add(p.getId()));
         log(null, "system", "开始发言，按座位顺序轮流说话。");
+        notifySnapshot();
     }
 
     private void doVote() {
@@ -654,6 +701,7 @@ public class WerewolfGame {
                     .map(p -> new Option(p.getId(), p.getName()))
                     .toList();
             waiting = new Waiting("VOTE", "放逐投票", "选择一名玩家投票放逐。", options);
+            notifySnapshot();
             return;
         }
         finalizeVote();
@@ -664,6 +712,7 @@ public class WerewolfGame {
         if (decisionProvider != null) {
             List<Player> voters = alivePlayers().stream().filter(p -> !p.isHuman()).toList();
             if (!voters.isEmpty()) {
+                notifyThinking("AI 正在结合发言、查验和票型决定放逐票…");
                 try {
                     Map<String, String> generated = decisionProvider.chooseVotes(this, voters);
                     if (generated != null) modelVotes = generated;
@@ -748,8 +797,10 @@ public class WerewolfGame {
             }
             waiting = new Waiting("HUNTER_SHOOT", "猎人开枪",
                     "你倒下了，但还能开枪带走一名玩家。选择你的目标。", options);
+            notifySnapshot();
             return;
         }
+        notifyThinking("猎人正在决定这一枪带走谁…");
         Player target = chooseHunterShot(hunter);
         finishHunter(target);
     }
@@ -1221,8 +1272,17 @@ public class WerewolfGame {
 
     private void log(String privateTo, String type, String text) {
         logSeq += 1;
-        logs.add(new LogEntry(logSeq, round, phase.name(), phase.getLabel(), type, text, privateTo));
+        LogEntry entry = new LogEntry(logSeq, round, phase.name(), phase.getLabel(), type, text, privateTo);
+        logs.add(entry);
         if (logs.size() > 260) logs.remove(0);
+        if (eventListener != null) {
+            try {
+                eventListener.onLog(entry);
+                eventListener.onSnapshot(toView());
+            } catch (Exception ignored) {
+                // The SSE client may have closed. Game state remains valid.
+            }
+        }
     }
 
     private PlayerView toPlayerView(Player p) {

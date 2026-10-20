@@ -39,6 +39,7 @@ type TimelineEntry =
   | { kind: 'log'; key: string; log: WerewolfLog }
 
 const liveSpeeches = ref<StreamSpeech[]>([])
+const liveLogs = ref<WerewolfLog[]>([])
 const activeSpeechKey = ref('')
 const thinking = ref('')
 const speakingTurn = ref(false)
@@ -93,11 +94,18 @@ const actionLabel = computed(() => {
   return '确认'
 })
 
+const displayLogs = computed<WerewolfLog[]>(() => {
+  const merged = new Map<number, WerewolfLog>()
+  for (const log of game.value?.logs ?? []) merged.set(log.seq, log)
+  for (const log of liveLogs.value) merged.set(log.seq, log)
+  return [...merged.values()].sort((a, b) => a.seq - b.seq)
+})
+
 const timeline = computed<TimelineEntry[]>(() => {
   if (!game.value) return []
   const entries: TimelineEntry[] = []
   let segment = ''
-  for (const log of game.value.logs) {
+  for (const log of displayLogs.value) {
     if (log.round > 0) {
       const night = log.phase.startsWith('NIGHT')
       const key = `${log.round}-${night ? 'night' : 'day'}`
@@ -124,7 +132,7 @@ watch(
 )
 
 watch(
-  () => [game.value?.logs.length, liveSpeeches.value.map((s) => s.text).join('|'), thinking.value],
+  () => [displayLogs.value.length, liveSpeeches.value.map((s) => s.text).join('|'), thinking.value],
   async () => {
     await nextTick()
     scrollBottom()
@@ -157,6 +165,28 @@ function applyGame(next: WerewolfGame) {
   selectedTarget.value = next.waiting?.options[0]?.id ?? ''
 }
 
+function applySnapshot(next: WerewolfGame) {
+  const current = game.value
+  if (!current) return
+  current.round = next.round
+  current.phase = next.phase
+  current.phaseLabel = next.phaseLabel
+  current.phaseHint = next.phaseHint
+  current.over = next.over
+  current.winner = next.winner
+  current.winnerLabel = next.winnerLabel
+  current.humanAlive = next.humanAlive
+  current.players = next.players
+  current.waiting = next.waiting
+  current.summary = next.summary
+  current.abilities = next.abilities
+  current.teammates = next.teammates
+  if (next.waiting) {
+    const keep = next.waiting.options.some((option) => option.id === selectedTarget.value)
+    if (!keep) selectedTarget.value = next.waiting.options[0]?.id ?? ''
+  }
+}
+
 async function createGame(watchMode = false) {
   if (creating.value) return
   if (!setup.playerName.trim()) {
@@ -184,6 +214,7 @@ async function runStream(payload: WerewolfStreamPayload) {
   if (!game.value || busy.value) return
   busy.value = true
   liveSpeeches.value = []
+  liveLogs.value = []
   activeSpeechKey.value = ''
   speakingTurn.value = false
   thinking.value = 'AI 正在整理这一轮的局势…'
@@ -192,6 +223,14 @@ async function runStream(payload: WerewolfStreamPayload) {
     await werewolfApi.stream(gameId, payload, {
       onThinking(text) {
         thinking.value = text || 'AI 正在整理这一轮的局势…'
+      },
+      onLog(log) {
+        if (!liveLogs.value.some((item) => item.seq === log.seq)) {
+          liveLogs.value.push(log)
+        }
+      },
+      onSnapshot(snapshot) {
+        if (game.value?.id === gameId) applySnapshot(snapshot)
       },
       onSpeakingTurn() {
         thinking.value = ''
@@ -228,6 +267,7 @@ async function runStream(payload: WerewolfStreamPayload) {
         if (game.value?.id !== gameId) return
         applyGame(next)
         liveSpeeches.value = []
+        liveLogs.value = []
         activeSpeechKey.value = ''
         thinking.value = ''
       },
@@ -280,6 +320,7 @@ function resetGame() {
   speech.value = ''
   error.value = ''
   liveSpeeches.value = []
+  liveLogs.value = []
   activeSpeechKey.value = ''
   thinking.value = ''
 }
