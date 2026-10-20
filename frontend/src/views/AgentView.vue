@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { agentApi, type AgentArtifact, type AgentMemory, type AgentSkill, type AgentStatus } from '@/api/agent'
+import { ragApi } from '@/api/rag'
 
 type ActivityKind = 'status' | 'thought' | 'tool' | 'plan' | 'validation'
 
@@ -27,6 +28,8 @@ const MODE_KEY = 'sunny_agent_mode_v1'
 
 const status = ref<AgentStatus | null>(null)
 const skills = ref<AgentSkill[]>([])
+const knowledgeBases = ref<Array<{ id: string; name: string; description: string; files: number }>>([])
+const selectedKbs = ref<string[]>(JSON.parse(localStorage.getItem('sunny_agent_kbs_v1') || '[]'))
 const sessionId = ref(localStorage.getItem(SESSION_KEY) || '')
 const mode = ref(localStorage.getItem(MODE_KEY) || 'auto')
 const messages = ref<ChatMessage[]>([])
@@ -49,6 +52,11 @@ onMounted(async () => {
     skills.value = k
   } catch {
     // Keep the chat usable; status errors are shown on send.
+  }
+  try {
+    knowledgeBases.value = await ragApi.databases()
+  } catch {
+    knowledgeBases.value = []
   }
   if (sessionId.value) {
     try {
@@ -117,11 +125,12 @@ async function send(text?: string) {
   messages.value.push(assistant)
   busy.value = true
   localStorage.setItem(MODE_KEY, mode.value)
+  localStorage.setItem('sunny_agent_kbs_v1', JSON.stringify(selectedKbs.value))
   await scrollBottom()
 
   try {
     await agentApi.stream(
-      { sessionId: sessionId.value, message: question, mode: mode.value },
+      { sessionId: sessionId.value, message: question, mode: mode.value, knowledgeBaseIds: selectedKbs.value },
       {
         onEvent(type, message, detail) {
           if (type === 'session') {
@@ -340,10 +349,25 @@ function formatSize(size: number) {
 
       <div class="agent-composer">
         <div class="agent-toolbar">
-          <div class="agent-modes" role="group" aria-label="执行模式">
-            <button v-for="item in ['auto', 'react', 'plan']" :key="item" type="button" :class="{ active: mode === item }" @click="mode = item">
-              {{ modeLabel(item) }}
-            </button>
+          <div class="agent-toolbar-left">
+            <div class="agent-modes" role="group" aria-label="执行模式">
+              <button v-for="item in ['auto', 'react', 'plan']" :key="item" type="button" :class="{ active: mode === item }" @click="mode = item">
+                {{ modeLabel(item) }}
+              </button>
+            </div>
+            <details v-if="knowledgeBases.length" class="agent-kb-picker">
+              <summary>
+                知识库
+                <span v-if="selectedKbs.length">{{ selectedKbs.length }}</span>
+              </summary>
+              <div class="agent-kb-menu">
+                <label v-for="kb in knowledgeBases" :key="kb.id">
+                  <input v-model="selectedKbs" type="checkbox" :value="kb.id" />
+                  <span>{{ kb.name }}<small>{{ kb.files }} 文件</small></span>
+                </label>
+                <p v-if="!knowledgeBases.length">还没有知识库</p>
+              </div>
+            </details>
           </div>
           <span class="agent-hint">Enter 发送 · Shift + Enter 换行</span>
         </div>
@@ -460,6 +484,16 @@ function formatSize(size: number) {
 .agent-artifact-download { flex: 0 0 auto; color: #6d879b; font-size: 14px; }
 .agent-composer { flex: 0 0 auto; padding: 13px 28px 17px; border-top: 1px solid rgba(121, 139, 158, 0.14); background: rgba(255, 253, 248, 0.92); }
 .agent-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.agent-toolbar-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.agent-kb-picker { position: relative; }
+.agent-kb-picker summary { list-style: none; cursor: pointer; border-radius: 7px; padding: 5px 9px; background: #eef3f6; color: #5d7487; font-size: 10.5px; }
+.agent-kb-picker summary::-webkit-details-marker { display: none; }
+.agent-kb-picker summary span { display: inline-grid; place-items: center; min-width: 15px; height: 15px; margin-left: 4px; border-radius: 999px; background: #dce8f0; font-size: 9px; }
+.agent-kb-menu { position: absolute; bottom: calc(100% + 7px); left: 0; z-index: 10; min-width: 220px; max-height: 240px; overflow-y: auto; padding: 7px; border: 1px solid rgba(96, 119, 139, 0.16); border-radius: 10px; background: #fff; box-shadow: 0 10px 30px rgba(45, 64, 82, 0.14); }
+.agent-kb-menu label { display: flex; gap: 7px; align-items: flex-start; padding: 6px; border-radius: 6px; cursor: pointer; color: #526778; font-size: 11px; }
+.agent-kb-menu label:hover { background: #f5f8fa; }
+.agent-kb-menu label span { display: flex; flex-direction: column; gap: 2px; }
+.agent-kb-menu label small { color: #9ca7b0; font-size: 9px; }
 .agent-modes { display: flex; gap: 4px; padding: 3px; border-radius: 9px; background: #eef1f4; }
 .agent-modes button { border: 0; border-radius: 7px; padding: 5px 9px; background: transparent; color: #778591; font-size: 10.5px; cursor: pointer; }
 .agent-modes button.active { background: #fff; color: #35526d; box-shadow: 0 1px 4px rgba(55, 74, 92, 0.12); }

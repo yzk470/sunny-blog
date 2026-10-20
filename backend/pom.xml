@@ -25,6 +25,9 @@
         <spring-ai.version>1.0.0-M5</spring-ai.version>
         <okhttp.version>4.12.0</okhttp.version>
         <langgraph4j.version>1.5.13</langgraph4j.version>
+        <jedis.version>5.2.0</jedis.version>
+        <pdfbox.version>2.0.31</pdfbox.version>
+        <poi.version>5.3.0</poi.version>
     </properties>
 
     <dependencies>
@@ -63,6 +66,21 @@
             <groupId>org.bsc.langgraph4j</groupId>
             <artifactId>langgraph4j-core</artifactId>
             <version>${langgraph4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>${jedis.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>${pdfbox.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${poi.version}</version>
         </dependency>
         <dependency>
             <groupId>com.baomidou</groupId>

@@ -178,7 +178,10 @@ public class AgentReActService {
 
                 技能目录（需要时用 read_skill 读取完整内容）：
                 %s
-                """.formatted(tools.catalog(), skills.catalog());
+
+                %s
+                需要知识库资料时调用 search_knowledge；它会先向量粗检索，再由独立 rerank Agent 过滤。
+                """.formatted(tools.catalog(), skills.catalog(), tools.knowledgeHint());
     }
 
     private boolean looksLikeToolMarkup(String raw) {

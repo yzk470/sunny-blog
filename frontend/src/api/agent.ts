@@ -76,7 +76,7 @@ export const agentApi = {
     return httpGet<AgentSession>(`/agent/session/${encodeURIComponent(sessionId)}`)
   },
   async stream(
-    payload: { sessionId: string; message: string; mode: string },
+    payload: { sessionId: string; message: string; mode: string; knowledgeBaseIds?: string[] },
     handlers: AgentStreamHandlers,
     signal?: AbortSignal,
   ) {

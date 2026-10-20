@@ -140,6 +140,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/AgentArtifactsView.vue'),
         meta: { title: 'Agent 产物文件', requiresAuth: true },
       },
+      {
+        path: 'rag',
+        name: 'admin-rag',
+        component: () => import('@/views/admin/RagAdminView.vue'),
+        meta: { title: 'Agent 知识库', requiresAuth: true },
+      },
     ],
   },
   {

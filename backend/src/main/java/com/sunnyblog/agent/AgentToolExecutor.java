@@ -1,8 +1,11 @@
 package com.sunnyblog.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.sunnyblog.rag.RagService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -11,6 +14,31 @@ public class AgentToolExecutor {
     private final AgentFileTools fileTools;
     private final AgentSkillsService skillsService;
     private final AgentArtifactService artifacts;
+    private final RagService ragService;
+
+    private static final ThreadLocal<List<String>> SELECTED_KNOWLEDGE = new ThreadLocal<>();
+
+    public void setKnowledgeBases(List<String> ids) {
+        SELECTED_KNOWLEDGE.set(ids == null ? List.of() : List.copyOf(ids));
+    }
+
+    public void clearKnowledgeBases() {
+        SELECTED_KNOWLEDGE.remove();
+    }
+
+    public String knowledgeHint() {
+        List<String> ids = SELECTED_KNOWLEDGE.get();
+        if (ids == null || ids.isEmpty()) return "当前没有选择知识库。";
+        StringBuilder sb = new StringBuilder("当前会话选择的知识库：\n");
+        for (String id : ids) {
+            RagService.RagDatabase db = ragService.getDatabase(id);
+            if (db != null) {
+                sb.append("- ").append(db.getName()).append("（").append(db.getId()).append("，")
+                        .append(db.getFiles().size()).append(" 个文件）\n");
+            }
+        }
+        return sb.toString();
+    }
 
     public AgentFileTools.ToolResult execute(String action, JsonNode input) {
         try {
@@ -36,6 +64,18 @@ public class AgentToolExecutor {
                 case "list_files" -> fileTools.list(text(input, "scope"), text(input, "path"));
                 case "delete_file" -> fileTools.delete(text(input, "scope"), text(input, "path"));
                 case "inspect_artifact" -> AgentFileTools.ToolResult.ok(artifacts.inspect(text(input, "path")));
+                case "search_knowledge" -> {
+                    String query = text(input, "query");
+                    List<String> ids = SELECTED_KNOWLEDGE.get();
+                    if (ids == null || ids.isEmpty()) {
+                        yield AgentFileTools.ToolResult.fail("当前会话没有选择知识库，请先在页面选择至少一个知识库。");
+                    }
+                    if (query == null || query.isBlank()) {
+                        yield AgentFileTools.ToolResult.fail("搜索问题为空");
+                    }
+                    yield AgentFileTools.ToolResult.ok(
+                            ragService.formatForAgent(ragService.search(query, ids, 0)));
+                }
                 case "run_script" -> fileTools.runScript(text(input, "scope"), text(input, "path"), text(input, "args"));
                 case "run_command" -> fileTools.runCommand(text(input, "scope"), text(input, "command"));
                 default -> AgentFileTools.ToolResult.fail("未知工具: " + action);
@@ -60,6 +100,7 @@ public class AgentToolExecutor {
                 - list_files: 列出目录。输入 {"scope":"workspace|skills|artifacts","path":"相对路径"}
                 - delete_file: 删除文件。输入 {"scope":"workspace|skills|artifacts","path":"相对路径"}
                 - inspect_artifact: 检查产物结构（PPT 页数/文字、Word 文字、图片尺寸、HTML 预览）。输入 {"path":"artifacts相对的路径"}
+                - search_knowledge: 从当前选择的知识库检索并经过独立 rerank Agent 过滤。输入 {"query":"要查找的问题"}
                 - run_script: 执行脚本。输入 {"scope":"workspace|skills","path":"scripts/task.py","args":"可选参数"}
                 - run_command: 仅用于简单只读检查（python3/node/ls/cat/pwd/find/head/tail/wc），禁止管道、重定向和 -c/-e；业务逻辑请写 scripts/ 后使用 run_script。
                 产物（pptx/docx/xlsx/pdf/html/图片）必须写到 scope=artifacts；脚本运行时环境变量 AGENT_ARTIFACTS_DIR 指向产物目录。

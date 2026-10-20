@@ -40,7 +40,7 @@ public class AgentController {
     private final AgentArtifactService artifacts;
     private final ExecutorService executor = Executors.newFixedThreadPool(3);
 
-    public record ChatRequest(String sessionId, String message, String mode) {
+    public record ChatRequest(String sessionId, String message, String mode, List<String> knowledgeBaseIds) {
     }
 
     @PreDestroy
@@ -110,7 +110,8 @@ public class AgentController {
         emitter.onError(ex -> log.debug("Agent SSE disconnected: {}", ex.getMessage()));
         executor.submit(() -> {
             try {
-                orchestrator.chat(request.sessionId(), safeQuestion, request.mode(), event -> send(emitter, event));
+                orchestrator.chat(request.sessionId(), safeQuestion, request.mode(),
+                        request.knowledgeBaseIds(), event -> send(emitter, event));
                 emitter.complete();
             } catch (Exception ex) {
                 log.warn("Agent chat failed: {}", ex.getMessage(), ex);

@@ -20,12 +20,13 @@ public class AgentOrchestrator {
     private final AgentReActService react;
     private final AgentPlanExecuteService planExecute;
     private final AgentArtifactService artifacts;
+    private final AgentToolExecutor tools;
 
     public record Result(String sessionId, String runId, String mode, String answer, String validation) {
     }
 
     public Result chat(String sessionId, String question, String requestedMode,
-                       Consumer<AgentEvent> events) {
+                       List<String> knowledgeBaseIds, Consumer<AgentEvent> events) {
         if (!llm.isConfigured()) {
             throw new IllegalStateException("Agent 模型未配置，请设置 DEEPSEEK_API_KEY");
         }
@@ -34,6 +35,7 @@ public class AgentOrchestrator {
         String mode = resolveMode(question, requestedMode);
         AgentRunService.AgentRun run = runs.create(session.getId(), question, mode);
         Instant started = Instant.now();
+        tools.setKnowledgeBases(knowledgeBaseIds);
         events.accept(new AgentEvent("session", session.getId(), run.getId()));
         events.accept(new AgentEvent("status", "正在读取记忆与技能…", ""));
 
@@ -88,6 +90,8 @@ public class AgentOrchestrator {
             runs.finish(run, failed, "FAILED", validation);
             events.accept(new AgentEvent("error", "执行失败", ex.getMessage()));
             return new Result(session.getId(), run.getId(), mode, failed, validation);
+        } finally {
+            tools.clearKnowledgeBases();
         }
 
         String finalAnswer = answer == null || answer.isBlank() ? "任务已结束，但没有生成有效回答。" : answer;
