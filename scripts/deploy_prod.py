@@ -28,6 +28,7 @@ REMOTE = "/opt/sunny-blog"
 DIST_ARCHIVE = ROOT / ".tmp" / "deploy-dist.tar.gz"
 JAR = ROOT / "backend" / "target" / "sunny-blog-1.0.0.jar"
 DIST = ROOT / "frontend" / "dist"
+RUNNER = ROOT / "scripts" / "agent-sandbox-runner.sh"
 
 
 def read_credentials() -> dict[str, str]:
@@ -97,6 +98,7 @@ def deploy(client) -> None:
     client.exec_command(f"mkdir -p {REMOTE}/incoming", timeout=30)[1].read()
     upload(client, JAR, f"{REMOTE}/incoming/sunny-blog.jar")
     upload(client, DIST_ARCHIVE, f"{REMOTE}/incoming/deploy-dist.tar.gz")
+    upload(client, RUNNER, f"{REMOTE}/incoming/sunny-agent-run")
 
     script = f"""
 set -e
@@ -109,6 +111,27 @@ mkdir -p frontend
 tar -xzf incoming/deploy-dist.tar.gz -C frontend
 mv -f incoming/sunny-blog.jar app/sunny-blog.jar
 chown -R sunnyblog:sunnyblog {REMOTE}
+# Provision the dedicated unprivileged script runner used by systemd-run.
+getent group agentrun >/dev/null 2>&1 || groupadd -r agentrun
+id sunnyagent >/dev/null 2>&1 || useradd -r -g agentrun -M -s /usr/sbin/nologin sunnyagent
+usermod -aG agentrun sunnyblog
+install -m 0755 incoming/sunny-agent-run /usr/local/bin/sunny-agent-run
+cat > /etc/sudoers.d/sunny-agent <<'SUDOERS'
+sunnyblog ALL=(root) NOPASSWD: /usr/local/bin/sunny-agent-run *
+SUDOERS
+chmod 0440 /etc/sudoers.d/sunny-agent
+visudo -cf /etc/sudoers.d/sunny-agent >/dev/null
+if grep -q '^NoNewPrivileges=true$' /etc/systemd/system/sunny-blog.service; then
+  sed -i 's/^NoNewPrivileges=true$/NoNewPrivileges=false/' /etc/systemd/system/sunny-blog.service
+  systemctl daemon-reload
+fi
+chmod 0600 {REMOTE}/.env
+# The deploy chown resets the agent sandbox group; restore it so the
+# unprivileged sunnyagent runner can read skills and write artifacts.
+chgrp -R agentrun {REMOTE}/data/agent/workspace {REMOTE}/data/agent/skills {REMOTE}/data/agent/artifacts 2>/dev/null || true
+chmod -R g+rwX {REMOTE}/data/agent/workspace {REMOTE}/data/agent/skills {REMOTE}/data/agent/artifacts 2>/dev/null || true
+find {REMOTE}/data/agent/workspace {REMOTE}/data/agent/skills {REMOTE}/data/agent/artifacts -type d -exec chmod g+s {{}} + 2>/dev/null || true
+chmod 0700 {REMOTE}/data/agent/sessions {REMOTE}/data/agent/runs 2>/dev/null || true
 systemctl start sunny-blog
 ok=0
 for i in $(seq 1 30); do
