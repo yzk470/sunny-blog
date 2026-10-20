@@ -16,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Owns the execution channel independently from the HTTP connection.
@@ -30,6 +32,7 @@ public class AgentTaskService {
     private final AgentRunService runs;
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    private final ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, TaskChannel> active = new ConcurrentHashMap<>();
     private final Map<String, TaskChannel> byClientTask = new ConcurrentHashMap<>();
 
@@ -58,11 +61,27 @@ public class AgentTaskService {
                 runs.setStatus(run, "INTERRUPTED");
             }
         }
+        heartbeat.scheduleAtFixedRate(() -> {
+            for (TaskChannel channel : active.values()) {
+                if (channel.done) continue;
+                for (SseEmitter emitter : channel.subscribers) {
+                    if (!send(emitter, null, new AgentEvent("heartbeat", "", ""))) {
+                        channel.subscribers.remove(emitter);
+                    }
+                }
+            }
+        }, 15, 15, TimeUnit.SECONDS);
     }
 
     @PreDestroy
     public void shutdown() {
         executor.shutdownNow();
+        heartbeat.shutdownNow();
+    }
+
+    public TaskView byClientTaskId(String clientTaskId) {
+        AgentRunService.AgentRun run = runs.findByClientTaskId(clientTaskId);
+        return run == null ? null : view(run.getId());
     }
 
     public synchronized SseEmitter start(String sessionId, String clientTaskId, String question,
@@ -70,8 +89,11 @@ public class AgentTaskService {
         String clientId = clientTaskId == null || clientTaskId.isBlank()
                 ? UUID.randomUUID().toString() : clientTaskId.trim();
         TaskChannel existingChannel = byClientTask.get(clientId);
-        if (existingChannel != null && existingChannel.runId != null) {
-            return attach(existingChannel.runId, 0);
+        if (existingChannel != null && !existingChannel.done) {
+            if (existingChannel.runId != null) return attach(existingChannel.runId, 0);
+            SseEmitter joined = createEmitter(existingChannel);
+            existingChannel.subscribers.add(joined);
+            return joined;
         }
         AgentRunService.AgentRun existing = runs.findByClientTaskId(clientId);
         if (existing != null) {

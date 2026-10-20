@@ -185,6 +185,9 @@ export const agentApi = {
   task(taskId: string) {
     return httpGet<AgentTaskView>(`/agent/tasks/${encodeURIComponent(taskId)}`)
   },
+  taskByClient(clientTaskId: string) {
+    return httpGet<AgentTaskView>(`/agent/tasks/by-client/${encodeURIComponent(clientTaskId)}`)
+  },
   taskEvents(taskId: string, after = 0) {
     return httpGet<AgentTaskEvent[]>(`/agent/tasks/${encodeURIComponent(taskId)}/events?after=${after}`)
   },

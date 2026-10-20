@@ -100,6 +100,12 @@ public class AgentController {
                 request.mode(), request.knowledgeBaseIds());
     }
 
+    @GetMapping("/tasks/by-client/{clientTaskId}")
+    public ApiResponse<AgentTaskService.TaskView> taskByClient(@PathVariable String clientTaskId) {
+        AgentTaskService.TaskView view = tasks.byClientTaskId(clientTaskId);
+        return view == null ? ApiResponse.fail(404, "任务不存在") : ApiResponse.ok(view);
+    }
+
     @GetMapping("/tasks/{taskId}")
     public ApiResponse<AgentTaskService.TaskView> task(@PathVariable String taskId) {
         AgentTaskService.TaskView view = tasks.view(taskId);

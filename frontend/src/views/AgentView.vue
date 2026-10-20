@@ -114,9 +114,16 @@ function saveActiveTask(task: ActiveTask | null) {
 
 async function restoreActiveTask() {
   const task = activeTask.value
-  if (!task || !task.taskId) {
-    if (task) saveActiveTask(null)
-    return
+  if (!task) return
+  if (!task.taskId) {
+    try {
+      const found = await agentApi.taskByClient(task.clientTaskId)
+      task.taskId = found.taskId
+      saveActiveTask(task)
+    } catch {
+      saveActiveTask(null)
+      return
+    }
   }
   try {
     const view = await agentApi.task(task.taskId)
@@ -213,6 +220,10 @@ function streamHandlers(assistant: ChatMessage, task: ActiveTask) {
           saveActiveTask(task)
         }
         return
+      }
+      if (type === 'done' && message && message !== '完成') {
+        needsResume.value = true
+        saveActiveTask(task)
       }
       applyEvent(assistant, type, message, detail)
     },
@@ -351,8 +362,19 @@ async function send(text?: string) {
       assistant.failed = true
       if (!assistant.content) assistant.content = ex instanceof Error ? ex.message : '请求失败'
       error.value = assistant.content
-      if (!task.taskId) saveActiveTask(null)
-      else needsResume.value = true
+      if (task.taskId) {
+        needsResume.value = true
+      } else {
+        try {
+          const found = await agentApi.taskByClient(task.clientTaskId)
+          task.taskId = found.taskId
+          assistant.taskId = found.taskId
+          saveActiveTask(task)
+          needsResume.value = found.status !== 'RUNNING'
+        } catch {
+          saveActiveTask(null)
+        }
+      }
     }
   } finally {
     busy.value = false
