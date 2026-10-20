@@ -312,6 +312,48 @@ public class WerewolfGame {
                 .collect(Collectors.joining("\n"));
     }
 
+    /** Full public transcript, kept append-only so model prompt prefixes stay cacheable. */
+    public String publicTranscript() {
+        return logs.stream()
+                .filter(l -> l.privateTo() == null)
+                .map(l -> "[" + l.phaseLabel() + "] " + l.text())
+                .collect(Collectors.joining("\n"));
+    }
+
+    /** Only what this agent knows privately: role, potions, checks, wolf teammates. */
+    public String privateKnowledge(Player viewer) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("你的身份：").append(viewer.getRole().getLabel())
+                .append("；阵营：").append(viewer.getRole().getTeam().getLabel()).append("。\n");
+        if (viewer.getRole() == Role.WEREWOLF) {
+            String mates = alivePlayers().stream()
+                    .filter(p -> p.getRole() == Role.WEREWOLF && !p.getId().equals(viewer.getId()))
+                    .map(p -> p.getName() + "(" + p.getId() + ")")
+                    .collect(Collectors.joining("、"));
+            sb.append("你的狼队友：").append(mates.isEmpty() ? "无" : mates).append("。\n");
+        } else if (viewer.getRole() == Role.SEER) {
+            sb.append("你的查验记录：\n");
+            if (seerChecks.isEmpty()) sb.append("- 还没有查验记录\n");
+            else {
+                for (Map.Entry<String, Role> e : seerChecks.entrySet()) {
+                    Player p = player(e.getKey());
+                    sb.append("- ").append(p == null ? e.getKey() : p.getName())
+                            .append("：").append(e.getValue().getLabel()).append("\n");
+                }
+            }
+        } else if (viewer.getRole() == Role.WITCH) {
+            sb.append("你的药剂：解药 ").append(viewer.hasAntidote() ? "可用" : "已用")
+                    .append("，毒药 ").append(viewer.hasPoison() ? "可用" : "已用").append("。\n");
+            if (wolfTarget != null) {
+                Player victim = player(wolfTarget);
+                sb.append("今晚被狼人袭击的是：").append(victim == null ? "未知" : victim.getName()).append("。\n");
+            }
+        } else if (viewer.getRole() == Role.HUNTER) {
+            sb.append("你的猎枪：").append(viewer.hasCanShoot() ? "可以开枪" : "已使用").append("。\n");
+        }
+        return sb.toString();
+    }
+
     /**
      * Builds the private knowledge packet for one agent. This is the only context
      * a model prompt should receive for that agent.

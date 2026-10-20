@@ -1254,11 +1254,9 @@ function eventClass(log: WerewolfLog) {
 .ww-dialogue-head > span { padding-top: 8px; color: #9aa8b6; font-size: 0.66rem; text-align: right; }
 
 .ww-timeline {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 280px;
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 4px 18px 20px;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -1285,7 +1283,7 @@ function eventClass(log: WerewolfLog) {
 .ww-divider em { color: #b2bdc8; font-size: 0.56rem; font-style: normal; letter-spacing: 0.16em; }
 
 .ww-chat-row { display: flex; gap: 8px; align-items: flex-start; margin: 5px 0; max-width: 92%; }
-.ww-chat-row.mine { align-self: flex-end; flex-direction: row-reverse; }
+.ww-chat-row.mine { margin-left: auto; flex-direction: row-reverse; }
 .ww-chat-avatar {
   display: grid;
   width: 27px;
@@ -1375,6 +1373,7 @@ function eventClass(log: WerewolfLog) {
 @keyframes ww-pulse { 50% { opacity: 0.3; transform: translateY(-2px); } }
 
 .ww-composer {
+  flex: 0 0 auto;
   padding: 14px 18px 17px;
   border-top: 1px solid rgba(132, 158, 183, 0.12);
   background: rgba(255, 252, 246, 0.92);
@@ -1417,7 +1416,7 @@ function eventClass(log: WerewolfLog) {
   .ww-table { order: 1; }
   .ww-side { order: 3; grid-template-columns: 1fr 1fr; }
   .ww-dialogue { max-height: none; min-height: 460px; }
-  .ww-timeline { min-height: 260px; }
+  .ww-timeline { min-height: 0; }
   .ww-identity { grid-column: 1 / -1; }
   .ww-player-list { display: grid; grid-template-columns: 1fr 1fr; }
 }
