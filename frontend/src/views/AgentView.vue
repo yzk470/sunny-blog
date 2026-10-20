@@ -145,6 +145,7 @@ async function restoreActiveTask() {
       if (current) Object.assign(current, assistant)
     }
     task.assistantId = messages.value[messages.value.length - 1]?.id || assistant.id
+    task.lastSeq = 0
     saveActiveTask(task)
     needsResume.value = view.status !== 'RUNNING' && view.status !== 'PAUSED'
     busy.value = true

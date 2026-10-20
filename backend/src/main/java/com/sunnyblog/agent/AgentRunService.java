@@ -229,6 +229,16 @@ public class AgentRunService {
     private void save(AgentRun run) {
         Path file = runFile(run.getId());
         try {
+            // Events are appended by the task stream service while the executor
+            // holds its own AgentRun instance. Merge the durable event log back
+            // before writing so a checkpoint cannot erase live events.
+            if (Files.exists(file)) {
+                AgentRun disk = read(file);
+                if (disk != null && disk.getEventSeq() > run.getEventSeq()) {
+                    run.setEvents(disk.getEvents());
+                    run.setEventSeq(disk.getEventSeq());
+                }
+            }
             Files.createDirectories(file.getParent());
             Path temp = Files.createTempFile(file.getParent(), run.getId(), ".tmp");
             objectMapper.writeValue(temp.toFile(), run);
