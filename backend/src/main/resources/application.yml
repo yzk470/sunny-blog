@@ -95,6 +95,10 @@ app:
     command-timeout-seconds: ${AGENT_COMMAND_TIMEOUT:20}
     max-output-chars: ${AGENT_MAX_OUTPUT_CHARS:12000}
     model: ${AGENT_MODEL:deepseek-flash}
+    systemd-run: ${AGENT_SYSTEMD_RUN:false}
+    systemd-runtime-dir: ${AGENT_SYSTEMD_RUNTIME_DIR:/run/user/999}
+    systemd-runner: ${AGENT_SYSTEMD_RUNNER:/usr/local/bin/sunny-agent-run}
+    systemd-private-network: ${AGENT_SYSTEMD_PRIVATE_NETWORK:true}
 
 hunyuan:
   motion:

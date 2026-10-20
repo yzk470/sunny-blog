@@ -61,7 +61,7 @@ public class AgentToolExecutor {
                 - delete_file: 删除文件。输入 {"scope":"workspace|skills|artifacts","path":"相对路径"}
                 - inspect_artifact: 检查产物结构（PPT 页数/文字、Word 文字、图片尺寸、HTML 预览）。输入 {"path":"artifacts相对的路径"}
                 - run_script: 执行脚本。输入 {"scope":"workspace|skills","path":"scripts/task.py","args":"可选参数"}
-                - run_command: 执行白名单命令（python3/python/node/ls/cat/pwd/find/head/tail/wc）。输入 {"scope":"workspace|skills","command":"python3 scripts/task.py"}
+                - run_command: 仅用于简单只读检查（python3/node/ls/cat/pwd/find/head/tail/wc），禁止管道、重定向和 -c/-e；业务逻辑请写 scripts/ 后使用 run_script。
                 产物（pptx/docx/xlsx/pdf/html/图片）必须写到 scope=artifacts；脚本运行时环境变量 AGENT_ARTIFACTS_DIR 指向产物目录。
                 """;
     }

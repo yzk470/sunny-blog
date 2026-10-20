@@ -152,6 +152,8 @@ public class AgentReActService {
                 你只能通过工具观察世界，不能假装执行过命令或读取过文件。
                 如果任务要求运行脚本或命令，必须实际调用 run_script / run_command 并读取真实输出，不能用文字声称结果。
                 如果工具返回 ERROR，必须分析错误、修改代码或路径后重试；最多重试直到任务完成。
+                严格规则：不要直接使用 run_command 执行 shell 逻辑。请把逻辑写成 scripts/ 下的 .py 或 .js 脚本，再用 run_script 执行。
+                禁止在 run_command 中使用管道 |、重定向 >、&、;、内联代码 -c/-e 或命令串联；run_command 只用于简单只读检查。
                 所有文件路径都必须相对于 workspace、skills 或 artifacts；
                 脚本放在 workspace/scripts 下，用 run_script 执行；技能目录里的脚本用 scope=skills 执行。
                 用户要 PPT/Word/Excel/PDF/HTML/插画等产物时，必须真正生成文件并写到 scope=artifacts；

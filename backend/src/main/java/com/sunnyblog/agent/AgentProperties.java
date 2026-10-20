@@ -14,4 +14,8 @@ public class AgentProperties {
     private int commandTimeoutSeconds = 20;
     private int maxOutputChars = 12000;
     private String model = "deepseek-flash";
+    private boolean systemdRun = false;
+    private String systemdRuntimeDir = "/run/user/999";
+    private String systemdRunner = "/usr/local/bin/sunny-agent-run";
+    private boolean systemdPrivateNetwork = true;
 }

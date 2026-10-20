@@ -144,7 +144,8 @@ public class AgentPlanExecuteService {
         String system = """
                 你是任务规划器。把一个长任务拆成 2～6 个可执行步骤。
                 每一步都应当有明确产物，优先使用 agent 的文件/脚本/skill 工具。
-                所有路径必须相对于 workspace/skills/artifacts；脚本写在 workspace/scripts 下，用 run_script 执行。
+                所有路径必须相对于 workspace/skills/artifacts；脚本写在 workspace/scripts 下。
+                不要规划 shell 命令或管道；请把命令逻辑写成脚本，再用 run_script 执行。
                 用户要 PPT/Word/Excel/PDF/HTML/图片时，最后必须有真实产物文件写入 artifacts。
                 不允许规划 /tmp、绝对路径或直接访问系统文件。
                 只输出 JSON：{"steps":["步骤1","步骤2"],"reason":"一句理由"}。

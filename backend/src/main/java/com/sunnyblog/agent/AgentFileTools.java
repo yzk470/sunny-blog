@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -203,15 +204,23 @@ public class AgentFileTools {
 
     private ToolResult execute(List<String> command, Path cwd) {
         try {
-            log.info("Agent executing {} in {}", command, cwd);
-            ProcessBuilder builder = new ProcessBuilder(command);
-            builder.directory(cwd.toFile());
+            log.info("Agent executing {} in {} (systemd={})", command, cwd, properties.isSystemdRun());
+            boolean isolated = properties.isSystemdRun();
+            List<String> actualCommand = isolated ? systemdCommand(command, cwd) : command;
+            ProcessBuilder builder = new ProcessBuilder(actualCommand);
+            if (!isolated) builder.directory(cwd.toFile());
             builder.redirectErrorStream(true);
             builder.environment().remove("DEEPSEEK_API_KEY");
             builder.environment().remove("OPENAI_API_KEY");
-            builder.environment().put("AGENT_WORKSPACE_DIR", workspaceRoot().toString());
-            builder.environment().put("AGENT_SKILLS_DIR", skillsRoot().toString());
-            builder.environment().put("AGENT_ARTIFACTS_DIR", artifactsRoot().toString());
+            if (isolated) {
+                builder.environment().put("XDG_RUNTIME_DIR", properties.getSystemdRuntimeDir());
+                builder.environment().put("DBUS_SESSION_BUS_ADDRESS",
+                        "unix:path=" + properties.getSystemdRuntimeDir() + "/bus");
+            } else {
+                builder.environment().put("AGENT_WORKSPACE_DIR", workspaceRoot().toString());
+                builder.environment().put("AGENT_SKILLS_DIR", skillsRoot().toString());
+                builder.environment().put("AGENT_ARTIFACTS_DIR", artifactsRoot().toString());
+            }
             Process process = builder.start();
             process.getOutputStream().close();
             CompletableFuture<byte[]> outputFuture = CompletableFuture.supplyAsync(() -> {
@@ -257,6 +266,42 @@ public class AgentFileTools {
 
     private String python() {
         return Files.exists(Path.of("/usr/bin/python3")) ? "python3" : "python";
+    }
+
+    /**
+     * Calls the root-owned wrapper, which launches a transient system service as
+     * the dedicated unprivileged sunnyagent user. The backend itself never runs
+     * model-controlled code and never gains root privileges.
+     */
+    private List<String> systemdCommand(List<String> original, Path cwd) {
+        List<String> command = new ArrayList<>();
+        command.add("/usr/bin/sudo");
+        command.add("-n");
+        command.add(properties.getSystemdRunner());
+        command.add("--cwd");
+        command.add(cwd.toString());
+        command.add("--timeout");
+        command.add(String.valueOf(properties.getCommandTimeoutSeconds()));
+        command.add("--workspace");
+        command.add(workspaceRoot().toString());
+        command.add("--skills");
+        command.add(skillsRoot().toString());
+        command.add("--artifacts");
+        command.add(artifactsRoot().toString());
+        command.add("--");
+        List<String> executable = new ArrayList<>(original);
+        String exe = executable.get(0);
+        if (!exe.startsWith("/")) {
+            String absolute = switch (exe) {
+                case "python", "python3" -> "/usr/bin/python3";
+                case "node" -> "/usr/bin/node";
+                case "ls", "cat", "pwd", "find", "head", "tail", "wc" -> "/usr/bin/" + exe;
+                default -> exe;
+            };
+            executable.set(0, absolute);
+        }
+        command.addAll(executable);
+        return command;
     }
 
     private String clip(String text) {
