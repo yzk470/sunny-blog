@@ -61,6 +61,11 @@ public class AgentPlanExecuteService {
                     请根据验收意见重新检查并修正结果。
                     """.formatted(task, plan.getAnswer(), plan.getValidation()),
                     memoryContext, run, plan.getCurrent(), events, 6);
+            if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
+                plan.setPaused(true);
+                runs.checkpoint(run);
+                return "任务已按请求暂停，当前计划进度已写入 checkpoint。";
+            }
             plan.setCurrent(null);
             plan.setAnswer(revised);
             plan.setRevisionInProgress(false);
@@ -101,6 +106,11 @@ public class AgentPlanExecuteService {
                     """.formatted(task, i + 1, plan.getPlan().size(), step,
                     plan.getResults().isBlank() ? "（无）" : plan.getResults());
             String answer = react.run(stepTask, memoryContext, run, plan.getCurrent(), events, 6);
+            if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
+                plan.setPaused(true);
+                runs.checkpoint(run);
+                return "任务已按请求暂停，当前计划进度已写入 checkpoint。";
+            }
             plan.setCurrent(null);
             plan.setAnswer(answer);
             plan.setResults(plan.getResults() + "\n[" + (i + 1) + "] " + step + "\n结果：" + answer + "\n");
@@ -134,6 +144,11 @@ public class AgentPlanExecuteService {
                         请根据验收意见重新检查并修正结果。
                         """.formatted(task, plan.getAnswer(), validation.reason),
                         memoryContext, run, plan.getCurrent(), events, 6);
+                if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
+                    plan.setPaused(true);
+                    runs.checkpoint(run);
+                    return "任务已按请求暂停，当前计划进度已写入 checkpoint。";
+                }
                 plan.setCurrent(null);
                 plan.setRevisionInProgress(false);
                 plan.setAnswer(revised);

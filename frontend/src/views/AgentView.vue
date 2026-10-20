@@ -371,6 +371,10 @@ async function send(text?: string) {
           assistant.taskId = found.taskId
           saveActiveTask(task)
           needsResume.value = found.status !== 'RUNNING'
+          if (found.status === 'RUNNING' || found.status === 'PAUSED' || found.status === 'INTERRUPTED') {
+            busy.value = true
+            await attachActive(assistant, task)
+          }
         } catch {
           saveActiveTask(null)
         }
