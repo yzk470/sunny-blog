@@ -88,6 +88,13 @@ app:
     motion-dir: ${DIGITAL_HUMAN_MOTION_DIR:./data/digital-human/motions}
     max-history: ${DIGITAL_HUMAN_MAX_HISTORY:10}
     max-context-chars: ${DIGITAL_HUMAN_MAX_CONTEXT_CHARS:5000}
+  agent:
+    dir: ${AGENT_DATA_DIR:./data/agent}
+    execution-enabled: ${AGENT_EXECUTION_ENABLED:true}
+    max-steps: ${AGENT_MAX_STEPS:10}
+    command-timeout-seconds: ${AGENT_COMMAND_TIMEOUT:20}
+    max-output-chars: ${AGENT_MAX_OUTPUT_CHARS:12000}
+    model: ${AGENT_MODEL:deepseek-flash}
 
 hunyuan:
   motion:

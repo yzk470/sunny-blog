@@ -49,6 +49,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '狼人杀 · 月白小镇' },
       },
       {
+        path: 'agent',
+        name: 'agent',
+        component: () => import('@/views/AgentView.vue'),
+        meta: { title: '智能体 · 月白' },
+      },
+      {
         path: 'guestbook',
         name: 'guestbook',
         component: () => import('@/views/GuestbookView.vue'),
@@ -115,6 +121,18 @@ const routes: RouteRecordRaw[] = [
         name: 'admin-profile',
         component: () => import('@/views/admin/ProfileView.vue'),
         meta: { title: '站点资料', requiresAuth: true },
+      },
+      {
+        path: 'agent-skills',
+        name: 'admin-agent-skills',
+        component: () => import('@/views/admin/AgentSkillsView.vue'),
+        meta: { title: 'Agent 技能', requiresAuth: true },
+      },
+      {
+        path: 'agent-runs',
+        name: 'admin-agent-runs',
+        component: () => import('@/views/admin/AgentRunsView.vue'),
+        meta: { title: 'Agent 执行链路', requiresAuth: true },
       },
     ],
   },

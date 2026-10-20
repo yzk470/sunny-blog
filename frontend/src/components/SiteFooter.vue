@@ -35,6 +35,7 @@ const year = new Date().getFullYear()
         <RouterLink to="/archives">时光归档</RouterLink>
         <RouterLink to="/digital-human">3D 数字人</RouterLink>
         <RouterLink to="/werewolf">狼人杀</RouterLink>
+        <RouterLink to="/agent">智能体</RouterLink>
         <RouterLink to="/guestbook">留言板</RouterLink>
         <RouterLink to="/about">关于站长</RouterLink>
       </div>

@@ -28,6 +28,13 @@ const navGroups = [
     ],
   },
   {
+    label: 'AGENT',
+    items: [
+      { name: 'admin-agent-skills', label: 'Agent 技能', icon: '🧠' },
+      { name: 'admin-agent-runs', label: '执行链路', icon: '🛠️' },
+    ],
+  },
+  {
     label: 'SETTINGS',
     items: [
       { name: 'admin-taxonomy', label: '分类与标签', icon: '🏷️' },

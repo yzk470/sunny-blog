@@ -14,6 +14,7 @@ const navItems = [
   { label: '归档', to: '/archives' },
   { label: '数字人', to: '/digital-human' },
   { label: '狼人杀', to: '/werewolf' },
+  { label: '智能体', to: '/agent' },
   { label: '关于', to: '/about' },
   { label: '留言板', to: '/guestbook' },
 ]
