@@ -29,7 +29,8 @@ for dir in "$workspace" "$skills" "$artifacts"; do
   case "$dir" in
     /opt/sunny-blog/data/agent/workspace|\
     /opt/sunny-blog/data/agent/skills|\
-    /opt/sunny-blog/data/agent/artifacts) ;;
+    /opt/sunny-blog/data/agent/artifacts|\
+    /opt/sunny-blog/data/agent/artifacts/*) ;;
     *) echo "invalid agent directory" >&2; exit 64 ;;
   esac
 done

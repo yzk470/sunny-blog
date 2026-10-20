@@ -59,6 +59,12 @@ public class AgentFileTools {
         if (!runRoot.startsWith(base)) throw new IllegalStateException("非法任务产物路径");
         try {
             Files.createDirectories(runRoot);
+            try {
+                Files.setPosixFilePermissions(runRoot,
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxr-x"));
+            } catch (UnsupportedOperationException ignored) {
+                // Windows development environment.
+            }
         } catch (IOException ex) {
             throw new IllegalStateException("无法创建任务产物目录", ex);
         }
