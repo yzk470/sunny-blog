@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -214,7 +215,8 @@ public class WerewolfGame {
         String chooseSeerCheck(WerewolfGame game, Player seer);
         Boolean chooseWitchSave(WerewolfGame game, Player witch, Player victim);
         String chooseWitchPoison(WerewolfGame game, Player witch);
-        Map<String, String> chooseVotes(WerewolfGame game, List<Player> voters);
+        Map<String, String> chooseVotes(WerewolfGame game, List<Player> voters,
+                                       Consumer<Map.Entry<String, String>> onVote);
         String chooseHunterShot(WerewolfGame game, Player hunter);
     }
 
@@ -413,12 +415,13 @@ public class WerewolfGame {
         return null;
     }
 
-    public void recordSpeech(String playerId, String text) {
+    public int recordSpeech(String playerId, String text) {
         Player speaker = player(playerId);
-        if (speaker == null || !speaker.isAlive() || text == null || text.isBlank()) return;
+        if (speaker == null || !speaker.isAlive() || text == null || text.isBlank()) return 0;
         discussionQueue.remove(playerId);
         discussionSpoken.add(playerId);
         log(null, "speech", speaker.getName() + "：" + text.trim());
+        return logSeq;
     }
 
     public void finishDiscussion() {
@@ -750,30 +753,39 @@ public class WerewolfGame {
     }
 
     private void finalizeVote() {
-        Map<String, String> modelVotes = Map.of();
-        if (decisionProvider != null) {
-            List<Player> voters = alivePlayers().stream().filter(p -> !p.isHuman()).toList();
-            if (!voters.isEmpty()) {
-                notifyThinking("AI 正在结合发言、查验和票型决定放逐票…");
-                try {
-                    Map<String, String> generated = decisionProvider.chooseVotes(this, voters);
-                    if (generated != null) modelVotes = generated;
-                } catch (Exception ignored) {
-                    modelVotes = Map.of();
-                }
+        Map<String, String> votes = new LinkedHashMap<>();
+        Consumer<Map.Entry<String, String>> record = entry -> {
+            Player voter = player(entry.getKey());
+            Player target = player(entry.getValue());
+            if (voter == null || target == null || !voter.isAlive()) return;
+            if (!target.isAlive() || target.getId().equals(voter.getId()) || votes.containsKey(voter.getId())) return;
+            votes.put(voter.getId(), target.getId());
+            log(null, "vote", voter.getName() + " → " + target.getName());
+            publicSuspicion.merge(target.getId(), 1, Integer::sum);
+        };
+
+        if (human().isAlive()) {
+            Player voteTarget = humanVoteTarget == null ? null : player(humanVoteTarget);
+            if (voteTarget != null && voteTarget.isAlive()) {
+                record.accept(Map.entry(humanId, humanVoteTarget));
             }
         }
-        Map<String, String> votes = new LinkedHashMap<>();
-        for (Player p : alivePlayers()) {
-            if (p.isHuman()) {
-                Player voteTarget = humanVoteTarget == null ? null : player(humanVoteTarget);
-                if (voteTarget != null && voteTarget.isAlive()) {
-                    votes.put(p.getId(), humanVoteTarget);
-                }
-            } else {
-                String target = chooseVote(p, modelVotes);
-                if (target != null) votes.put(p.getId(), target);
+
+        List<Player> aiVoters = alivePlayers().stream().filter(p -> !p.isHuman()).toList();
+        if (decisionProvider != null && !aiVoters.isEmpty()) {
+            notifyThinking("AI 正在结合发言、查验和票型决定放逐票…");
+            try {
+                decisionProvider.chooseVotes(this, aiVoters, record);
+            } catch (Exception ignored) {
+                // fall back below
             }
+        }
+        // Any AI whose model call failed or returned an invalid target gets a
+        // safe fallback, but each decision is still logged immediately.
+        for (Player p : aiVoters) {
+            if (votes.containsKey(p.getId())) continue;
+            String target = ruleVote(p);
+            if (target != null) record.accept(Map.entry(p.getId(), target));
         }
         humanVoteTarget = null;
 
@@ -782,15 +794,6 @@ public class WerewolfGame {
             if (checkWin()) return;
             beginNight();
             return;
-        }
-
-        for (Map.Entry<String, String> e : votes.entrySet()) {
-            Player voter = player(e.getKey());
-            Player target = player(e.getValue());
-            if (voter != null && target != null) {
-                log(null, "vote", voter.getName() + " → " + target.getName());
-                publicSuspicion.merge(target.getId(), 1, Integer::sum);
-            }
         }
 
         Map<String, Integer> counts = new LinkedHashMap<>();
@@ -1013,7 +1016,7 @@ public class WerewolfGame {
     private String autoHumanVote() {
         if (decisionProvider != null) {
             try {
-                Map<String, String> generated = decisionProvider.chooseVotes(this, List.of(human()));
+                Map<String, String> generated = decisionProvider.chooseVotes(this, List.of(human()), entry -> { });
                 String target = generated == null ? null : generated.get(humanId);
                 Player targetPlayer = target == null ? null : player(target);
                 if (targetPlayer != null && targetPlayer.isAlive() && !targetPlayer.getId().equals(humanId)) {

@@ -142,8 +142,8 @@ public class WerewolfService {
             String fallback = game.fallbackSpeech(speaker);
             String text = aiService.streamSpeech(game, speaker, fallback,
                     token -> sendQuietly(emitter, "token", Map.of("text", token)));
-            sendQuietly(emitter, "speech_end", Map.of("text", text));
-            game.recordSpeech(speaker.getId(), text);
+            int seq = game.recordSpeech(speaker.getId(), text);
+            sendQuietly(emitter, "speech_end", Map.of("text", text, "seq", seq));
         }
         game.finishDiscussion();
         game.advance();

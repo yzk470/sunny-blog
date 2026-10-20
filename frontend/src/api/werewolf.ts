@@ -88,7 +88,7 @@ export interface WerewolfStreamHandlers {
   onSpeakingTurn?: (data: { speakerId: string; speakerName: string; seat: number }) => void
   onSpeechStart?: (data: { speakerId: string; speakerName: string; seat: number }) => void
   onToken?: (text: string) => void
-  onSpeechEnd?: (text: string) => void
+  onSpeechEnd?: (text: string, seq?: number) => void
   onState?: (game: WerewolfGame) => void
   onDone?: () => void
 }
@@ -155,7 +155,7 @@ export const werewolfApi = {
       else if (event === 'speaking_turn') handlers.onSpeakingTurn?.(data)
       else if (event === 'speech_start') handlers.onSpeechStart?.(data)
       else if (event === 'token') handlers.onToken?.(String(data?.text || ''))
-      else if (event === 'speech_end') handlers.onSpeechEnd?.(String(data?.text || ''))
+      else if (event === 'speech_end') handlers.onSpeechEnd?.(String(data?.text || ''), Number(data?.seq || 0))
       else if (event === 'state') handlers.onState?.(data as WerewolfGame)
       else if (event === 'done') {
         done = true

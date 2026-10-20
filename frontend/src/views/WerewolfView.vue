@@ -32,11 +32,13 @@ type StreamSpeech = {
   seat: number
   text: string
   complete: boolean
+  seq: number
 }
 
 type TimelineEntry =
   | { kind: 'divider'; key: string; label: string; sub: string }
   | { kind: 'log'; key: string; log: WerewolfLog }
+  | { kind: 'speech'; key: string; speech: StreamSpeech }
 
 const liveSpeeches = ref<StreamSpeech[]>([])
 const liveLogs = ref<WerewolfLog[]>([])
@@ -103,9 +105,24 @@ const displayLogs = computed<WerewolfLog[]>(() => {
 
 const timeline = computed<TimelineEntry[]>(() => {
   if (!game.value) return []
+  type Raw =
+    | { seq: number; kind: 'log'; log: WerewolfLog }
+    | { seq: number; kind: 'speech'; speech: StreamSpeech }
+  const raw: Raw[] = []
+  for (const log of displayLogs.value) raw.push({ seq: log.seq, kind: 'log', log })
+  for (const speech of liveSpeeches.value) {
+    raw.push({ seq: speech.seq || Number.MAX_SAFE_INTEGER, kind: 'speech', speech })
+  }
+  raw.sort((a, b) => a.seq - b.seq)
+
   const entries: TimelineEntry[] = []
   let segment = ''
-  for (const log of displayLogs.value) {
+  for (const item of raw) {
+    if (item.kind === 'speech') {
+      entries.push({ kind: 'speech', key: item.speech.key, speech: item.speech })
+      continue
+    }
+    const log = item.log
     if (log.round > 0) {
       const night = log.phase.startsWith('NIGHT')
       const key = `${log.round}-${night ? 'night' : 'day'}`
@@ -248,6 +265,7 @@ async function runStream(payload: WerewolfStreamPayload) {
           seat: data.seat,
           text: '',
           complete: false,
+          seq: 0,
         })
         activeSpeechKey.value = key
       },
@@ -255,10 +273,11 @@ async function runStream(payload: WerewolfStreamPayload) {
         const current = liveSpeeches.value.find((s) => s.key === activeSpeechKey.value)
         if (current) current.text += text
       },
-      onSpeechEnd(text) {
+      onSpeechEnd(text, seq) {
         const current = liveSpeeches.value.find((s) => s.key === activeSpeechKey.value)
         if (current) {
           current.text = text
+          current.seq = seq || 0
           current.complete = true
         }
         activeSpeechKey.value = ''
@@ -577,6 +596,23 @@ function eventClass(log: WerewolfLog) {
                     <em>{{ entry.sub }}</em>
                   </div>
                   <div
+                    v-else-if="entry.kind === 'speech'"
+                    class="ww-chat-row"
+                    :class="{
+                      streaming: !entry.speech.complete,
+                      mine: entry.speech.speakerId === game.humanId,
+                    }"
+                  >
+                    <span class="ww-chat-avatar">{{ entry.speech.speakerName.slice(0, 1) }}</span>
+                    <div class="ww-chat-body">
+                      <div class="ww-chat-meta">
+                        <strong>{{ entry.speech.speakerName }}</strong>
+                        <em>{{ entry.speech.complete ? '已发言' : aiConfigured ? 'DeepSeek 输出中' : '生成中' }}</em>
+                      </div>
+                      <p class="ww-bubble">{{ entry.speech.text }}<span v-if="!entry.speech.complete" class="ww-cursor"></span></p>
+                    </div>
+                  </div>
+                  <div
                     v-else-if="isSpeech(entry.log)"
                     class="ww-chat-row"
                     :class="{
@@ -599,22 +635,6 @@ function eventClass(log: WerewolfLog) {
                     <p><strong>{{ entry.log.phaseLabel }}</strong>{{ entry.log.text }}</p>
                   </div>
                 </template>
-
-                <div
-                  v-for="speech in liveSpeeches"
-                  :key="speech.key"
-                  class="ww-chat-row"
-                  :class="{ streaming: !speech.complete, mine: speech.speakerId === game.humanId }"
-                >
-                  <span class="ww-chat-avatar">{{ speech.speakerName.slice(0, 1) }}</span>
-                  <div class="ww-chat-body">
-                    <div class="ww-chat-meta">
-                      <strong>{{ speech.speakerName }}</strong>
-                      <em>{{ speech.complete ? '已发言' : aiConfigured ? 'DeepSeek 输出中' : '生成中' }}</em>
-                    </div>
-                    <p class="ww-bubble">{{ speech.text }}<span v-if="!speech.complete" class="ww-cursor"></span></p>
-                  </div>
-                </div>
 
                 <div v-if="thinking && !activeSpeechKey" class="ww-thinking">
                   <span class="ww-thinking-dots"><i></i><i></i><i></i></span>

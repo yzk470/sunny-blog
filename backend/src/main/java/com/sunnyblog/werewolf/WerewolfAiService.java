@@ -14,8 +14,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -131,20 +133,27 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
     }
 
     @Override
-    public Map<String, String> chooseVotes(WerewolfGame game, List<WerewolfGame.Player> voters) {
+    public Map<String, String> chooseVotes(WerewolfGame game, List<WerewolfGame.Player> voters,
+                                           Consumer<Map.Entry<String, String>> onVote) {
         if (!configured || voters == null || voters.isEmpty()) return Map.of();
-        List<CompletableFuture<Map.Entry<String, String>>> futures = new ArrayList<>();
+        ExecutorCompletionService<Map.Entry<String, String>> completion =
+                new ExecutorCompletionService<>(executor);
         for (WerewolfGame.Player voter : voters) {
-            futures.add(CompletableFuture.supplyAsync(() -> {
+            completion.submit(() -> {
                 String target = chooseVoteFor(game, voter);
                 return target == null ? null : Map.entry(voter.getId(), target);
-            }, executor));
+            });
         }
         Map<String, String> votes = new LinkedHashMap<>();
-        for (CompletableFuture<Map.Entry<String, String>> future : futures) {
+        for (int i = 0; i < voters.size(); i++) {
             try {
-                Map.Entry<String, String> entry = future.get(45, TimeUnit.SECONDS);
-                if (entry != null) votes.put(entry.getKey(), entry.getValue());
+                Future<Map.Entry<String, String>> future = completion.poll(45, TimeUnit.SECONDS);
+                if (future == null) break;
+                Map.Entry<String, String> entry = future.get();
+                if (entry != null) {
+                    votes.put(entry.getKey(), entry.getValue());
+                    if (onVote != null) onVote.accept(entry);
+                }
             } catch (Exception ex) {
                 log.warn("Werewolf AI vote failed; engine will use a fallback: {}", ex.getMessage());
             }
