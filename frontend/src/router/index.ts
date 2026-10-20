@@ -134,6 +134,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/AgentRunsView.vue'),
         meta: { title: 'Agent 执行链路', requiresAuth: true },
       },
+      {
+        path: 'agent-artifacts',
+        name: 'admin-agent-artifacts',
+        component: () => import('@/views/admin/AgentArtifactsView.vue'),
+        meta: { title: 'Agent 产物文件', requiresAuth: true },
+      },
     ],
   },
   {

@@ -55,6 +55,7 @@ export interface AgentArtifact {
   path: string
   type: string
   size: number
+  modifiedAt?: string
   url: string
 }
 
@@ -151,5 +152,11 @@ export const agentApi = {
   },
   run(id: string) {
     return httpGet<AgentRun>(`/admin/agent/runs/${encodeURIComponent(id)}`)
+  },
+  adminArtifacts() {
+    return httpGet<AgentArtifact[]>('/admin/agent/artifacts')
+  },
+  deleteArtifact(path: string) {
+    return httpDelete<void>(`/admin/agent/artifacts?path=${encodeURIComponent(path)}`)
   },
 }

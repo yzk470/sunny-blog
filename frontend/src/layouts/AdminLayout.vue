@@ -32,6 +32,7 @@ const navGroups = [
     items: [
       { name: 'admin-agent-skills', label: 'Agent 技能', icon: '🧠' },
       { name: 'admin-agent-runs', label: '执行链路', icon: '🛠️' },
+      { name: 'admin-agent-artifacts', label: '产物文件', icon: '📦' },
     ],
   },
   {

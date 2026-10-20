@@ -22,6 +22,7 @@ public class AgentAdminController {
 
     private final AgentSkillsService skills;
     private final AgentRunService runs;
+    private final AgentArtifactService artifacts;
 
     public record SkillRequest(String slug, String name, String description, String content) {
     }
@@ -77,5 +78,19 @@ public class AgentAdminController {
     public ApiResponse<AgentRunService.AgentRun> run(@PathVariable String id) {
         AgentRunService.AgentRun run = runs.get(id);
         return run == null ? ApiResponse.fail(404, "运行记录不存在") : ApiResponse.ok(run);
+    }
+
+    @GetMapping("/artifacts")
+    public ApiResponse<List<AgentArtifactService.Artifact>> artifacts() {
+        return ApiResponse.ok(artifacts.list());
+    }
+
+    @DeleteMapping("/artifacts")
+    public ApiResponse<Void> deleteArtifact(@RequestParam String path) {
+        try {
+            return artifacts.delete(path) ? ApiResponse.ok() : ApiResponse.fail(404, "产物不存在");
+        } catch (Exception ex) {
+            return ApiResponse.fail(500, ex.getMessage());
+        }
     }
 }

@@ -29,7 +29,7 @@ public class AgentArtifactService {
     private final AgentProperties properties;
     private final ObjectMapper objectMapper;
 
-    public record Artifact(String name, String path, String type, long size, String url) {
+    public record Artifact(String name, String path, String type, long size, String modifiedAt, String url) {
     }
 
     public Path root() {
@@ -76,6 +76,7 @@ public class AgentArtifactService {
                                     relative,
                                     typeOf(relative),
                                     Files.size(path),
+                                    Files.getLastModifiedTime(path).toInstant().toString(),
                                     "/api/agent/artifacts?path=" + urlEncode(relative)
                             ));
                         } catch (IOException ignored) {
@@ -188,7 +189,8 @@ public class AgentArtifactService {
         if (!Files.isRegularFile(path)) return null;
         try {
             return new Artifact(path.getFileName().toString(), relative, typeOf(relative),
-                    Files.size(path), "/api/agent/artifacts?path=" + urlEncode(relative));
+                    Files.size(path), Files.getLastModifiedTime(path).toInstant().toString(),
+                    "/api/agent/artifacts?path=" + urlEncode(relative));
         } catch (IOException ex) {
             return null;
         }
@@ -201,8 +203,7 @@ public class AgentArtifactService {
         return path;
     }
 
-    public String typeOf(String name) {
-        String lower = name.toLowerCase(Locale.ROOT);
+    public String typeOf(String name) {        String lower = name.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".pptx")) return "pptx";
         if (lower.endsWith(".docx")) return "docx";
         if (lower.endsWith(".xlsx")) return "xlsx";
@@ -216,6 +217,26 @@ public class AgentArtifactService {
         if (lower.endsWith(".csv")) return "csv";
         if (lower.endsWith(".txt")) return "text";
         return "file";
+    }
+
+    public boolean delete(String relative) {
+        Path path = resolve(relative);
+        if (!Files.isRegularFile(path)) return false;
+        try {
+            Files.delete(path);
+            // Remove empty nested directories left by the deleted artifact.
+            Path parent = path.getParent();
+            while (parent != null && !parent.equals(root()) && Files.isDirectory(parent)) {
+                try (Stream<Path> children = Files.list(parent)) {
+                    if (children.findAny().isPresent()) break;
+                }
+                Files.delete(parent);
+                parent = parent.getParent();
+            }
+            return true;
+        } catch (IOException ex) {
+            throw new IllegalStateException("删除产物失败: " + ex.getMessage(), ex);
+        }
     }
 
     public String json(List<Artifact> artifacts) {
