@@ -5,6 +5,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -130,7 +132,10 @@ public class AgentReActService {
 
     private boolean taskRequiresExecution(String task) {
         if (task == null) return false;
-        return task.matches("(?s).*(运行|执行|跑一下|计算|统计输出|输出结果|验证输出).*");
+        String current = task;
+        Matcher matcher = Pattern.compile("当前步骤[^：\\n]*：([^\\n]+)").matcher(task);
+        if (matcher.find()) current = matcher.group(1);
+        return current.matches("(?s).*(运行|执行|跑一下|计算|统计输出|输出结果|验证输出).*");
     }
 
     private void record(AgentRunService.AgentRun run, String type, String title, String detail, boolean success) {
