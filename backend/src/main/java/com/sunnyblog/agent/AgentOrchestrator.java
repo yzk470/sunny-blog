@@ -93,10 +93,10 @@ public class AgentOrchestrator {
 
     private Result execute(AgentMemoryService.Session session, AgentRunService.AgentRun run,
                            String mode, String question, boolean resumed, Consumer<AgentEvent> events) {
+        AgentTaskControl.clear(run.getId());
         AgentTaskContext.set(session.getId(), run.getId());
         tools.setKnowledgeBases(run.getKnowledgeBaseIds());
-        try {
-            events.accept(new AgentEvent("session", session.getId(), run.getId()));
+        try {            events.accept(new AgentEvent("session", session.getId(), run.getId()));
             events.accept(new AgentEvent("status", resumed ? "从断点继续执行…" : "正在读取记忆与技能…", ""));
             String memoryContext = memory.buildPromptContext(session.getId(), 7000);
             if (!resumed) {
@@ -150,7 +150,7 @@ public class AgentOrchestrator {
                         answer = revised;
                     }
                 }
-                if ("CANCEL_REQUESTED".equals(run.getStatus())) {
+                if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
                     String cancelled = "任务已按请求停止，可以稍后从 checkpoint 继续。";
                     runs.finish(run, cancelled, "PAUSED", validation);
                     events.accept(new AgentEvent("answer", cancelled, "已暂停，可恢复"));

@@ -26,7 +26,11 @@ public class AgentReActService {
     public String run(String task, String memoryContext, AgentRunService.AgentRun run,
                       AgentRunService.ReActState state, Consumer<AgentEvent> events, int maxSteps) {
         if (state == null) state = new AgentRunService.ReActState();
-        if (state.getLastAnswer() != null && !state.getLastAnswer().isBlank()) return state.getLastAnswer();
+        if (state.isPaused()) {
+            state.setPaused(false);
+        } else if (state.getLastAnswer() != null && !state.getLastAnswer().isBlank()) {
+            return state.getLastAnswer();
+        }
         StringBuilder observations = new StringBuilder(state.getObservations() == null ? "" : state.getObservations());
         String lastAnswer = state.getLastAnswer();
         boolean executionSucceeded = state.isExecutionSucceeded();
@@ -48,9 +52,10 @@ public class AgentReActService {
         }
 
         for (int step = state.getStep(); step < limit; step++) {
-            if ("CANCEL_REQUESTED".equals(run.getStatus())) {
+            if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
                 String paused = "任务已按请求暂停，当前进度已写入 checkpoint。";
-                state.setLastAnswer(paused);
+                state.setPaused(true);
+                state.setLastAnswer(null);
                 state.setObservations(observations.toString());
                 runs.checkpoint(run);
                 return paused;

@@ -102,6 +102,7 @@ public class AgentTaskService {
         }
         TaskChannel channel = new TaskChannel(run.getClientTaskId());
         channel.runId = taskId;
+        AgentTaskControl.clear(taskId);
         active.put(taskId, channel);
         if (channel.clientTaskId != null) byClientTask.put(channel.clientTaskId, channel);
         SseEmitter emitter = createEmitter(channel);
@@ -173,6 +174,7 @@ public class AgentTaskService {
     public boolean cancel(String taskId) {
         AgentRunService.AgentRun run = runs.get(taskId);
         if (run == null || !isRunning(run)) return false;
+        AgentTaskControl.cancel(taskId);
         run.setStatus("CANCEL_REQUESTED");
         runs.checkpoint(run);
         return true;

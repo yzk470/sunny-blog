@@ -36,6 +36,7 @@ public class AgentPlanExecuteService {
             plan = new AgentRunService.PlanState();
             checkpoint.setPlan(plan);
         }
+        if (plan.isPaused()) plan.setPaused(false);
         checkpoint.setPhase("plan");
 
         if (plan.getPlan().isEmpty()) {
@@ -76,9 +77,9 @@ public class AgentPlanExecuteService {
         }
 
         for (int i = plan.getPlanIndex(); i < plan.getPlan().size(); i++) {
-            if ("CANCEL_REQUESTED".equals(run.getStatus())) {
+            if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
                 String paused = "任务已按请求暂停，当前计划进度已写入 checkpoint。";
-                plan.setAnswer(paused);
+                plan.setPaused(true);
                 runs.checkpoint(run);
                 return paused;
             }

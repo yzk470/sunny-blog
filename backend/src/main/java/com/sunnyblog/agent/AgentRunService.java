@@ -68,6 +68,7 @@ public class AgentRunService {
         private boolean lastToolFailed;
         private String lastExecutionOutput = "";
         private String lastAnswer;
+        private boolean paused;
         private Map<String, Integer> actionCounts = new LinkedHashMap<>();
         private List<ToolRecord> tools = new ArrayList<>();
         private PendingTool pending;
@@ -84,6 +85,7 @@ public class AgentRunService {
         private ReActState current;
         private String validation = "";
         private boolean passed;
+        private boolean paused;
     }
 
     @Data
