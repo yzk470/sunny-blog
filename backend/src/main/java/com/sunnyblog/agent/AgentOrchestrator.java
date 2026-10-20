@@ -45,11 +45,11 @@ public class AgentOrchestrator {
         try {
             if ("plan".equals(mode)) {
                 events.accept(new AgentEvent("status", "识别为长任务，进入 plan-and-execute…", ""));
-                answer = planExecute.run(question, memoryContext, run, events, started);
+                answer = ensureAnswer(planExecute.run(question, memoryContext, run, events, started), started);
                 validation = "独立验收已包含在计划执行流程中";
             } else {
                 events.accept(new AgentEvent("status", "识别为短任务，进入 ReAct 循环…", ""));
-                answer = react.run(question, memoryContext, run, events, 8);
+                answer = ensureAnswer(react.run(question, memoryContext, run, events, 12), started);
                 String artifactManifest = artifacts.manifestSince(started);
                 Validation result = validate(question, answer, artifactManifest);
                 validation = result.reason;
@@ -129,6 +129,22 @@ public class AgentOrchestrator {
     }
 
     public record Validation(boolean passed, String reason) {
+    }
+
+    private String ensureAnswer(String answer, Instant started) {
+        if (answer != null && !answer.isBlank()
+                && !answer.contains("步数已达到上限")
+                && !answer.contains("没有生成有效回答")) {
+            return answer;
+        }
+        List<AgentArtifactService.Artifact> produced = artifacts.listSince(started);
+        if (produced.isEmpty()) return answer;
+        StringBuilder sb = new StringBuilder("任务已完成，并生成了这些产物：\n");
+        for (AgentArtifactService.Artifact artifact : produced) {
+            sb.append("- ").append(artifact.name()).append("（").append(artifact.type())
+                    .append("，").append(artifact.size()).append(" bytes）\n");
+        }
+        return sb.toString().trim();
     }
 
     private String resolveMode(String question, String requested) {

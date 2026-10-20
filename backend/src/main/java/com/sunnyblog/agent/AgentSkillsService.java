@@ -128,6 +128,12 @@ public class AgentSkillsService {
         try {
             for (Map.Entry<String, byte[]> file : files.entrySet()) {
                 String relative = file.getKey();
+                final String entryName = relative;
+                if (files.keySet().stream().anyMatch(k -> k.startsWith(entryName + "/"))) {
+                    // Compress-Archive sometimes emits a directory entry without
+                    // a trailing slash; it must not overwrite a real directory.
+                    continue;
+                }
                 if (common != null && !common.isBlank() && relative.startsWith(common + "/")) {
                     relative = relative.substring(common.length() + 1);
                 }
