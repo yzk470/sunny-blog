@@ -71,6 +71,9 @@ public class WerewolfService {
                             default -> game.advance();
                         }
                         if (game.getPhase() == WerewolfGame.Phase.DISCUSSION && game.hasPendingDiscussion()) {
+                            // Publish the public dawn/discussion events and any human
+                            // speech before streaming the next AI line.
+                            send(emitter, "state", game.toView());
                             streamDiscussion(game, emitter, false);
                         }
                     }

@@ -26,17 +26,20 @@ const timelineRef = ref<HTMLElement | null>(null)
 const aiConfigured = ref(false)
 
 type StreamSpeech = {
+  key: string
   speakerId: string
   speakerName: string
   seat: number
   text: string
+  complete: boolean
 }
 
 type TimelineEntry =
   | { kind: 'divider'; key: string; label: string; sub: string }
   | { kind: 'log'; key: string; log: WerewolfLog }
 
-const streamingSpeech = ref<StreamSpeech | null>(null)
+const liveSpeeches = ref<StreamSpeech[]>([])
+const activeSpeechKey = ref('')
 const thinking = ref('')
 const speakingTurn = ref(false)
 
@@ -121,7 +124,7 @@ watch(
 )
 
 watch(
-  () => [game.value?.logs.length, streamingSpeech.value?.text, thinking.value],
+  () => [game.value?.logs.length, liveSpeeches.value.map((s) => s.text).join('|'), thinking.value],
   async () => {
     await nextTick()
     scrollBottom()
@@ -180,7 +183,8 @@ async function createGame(watchMode = false) {
 async function runStream(payload: WerewolfStreamPayload) {
   if (!game.value || busy.value) return
   busy.value = true
-  streamingSpeech.value = null
+  liveSpeeches.value = []
+  activeSpeechKey.value = ''
   speakingTurn.value = false
   thinking.value = 'AI 正在整理这一轮的局势…'
   const gameId = game.value.id
@@ -191,25 +195,40 @@ async function runStream(payload: WerewolfStreamPayload) {
       },
       onSpeakingTurn() {
         thinking.value = ''
-        streamingSpeech.value = null
+        activeSpeechKey.value = ''
         speakingTurn.value = true
       },
       onSpeechStart(data) {
         speakingTurn.value = false
-        streamingSpeech.value = { ...data, text: '' }
+        thinking.value = ''
+        const key = `live-${Date.now()}-${data.speakerId}-${liveSpeeches.value.length}`
+        liveSpeeches.value.push({
+          key,
+          speakerId: data.speakerId,
+          speakerName: data.speakerName,
+          seat: data.seat,
+          text: '',
+          complete: false,
+        })
+        activeSpeechKey.value = key
       },
       onToken(text) {
-        if (streamingSpeech.value) {
-          streamingSpeech.value = { ...streamingSpeech.value, text: streamingSpeech.value.text + text }
-        }
+        const current = liveSpeeches.value.find((s) => s.key === activeSpeechKey.value)
+        if (current) current.text += text
       },
       onSpeechEnd(text) {
-        if (streamingSpeech.value) streamingSpeech.value = { ...streamingSpeech.value, text }
+        const current = liveSpeeches.value.find((s) => s.key === activeSpeechKey.value)
+        if (current) {
+          current.text = text
+          current.complete = true
+        }
+        activeSpeechKey.value = ''
       },
       onState(next) {
         if (game.value?.id !== gameId) return
         applyGame(next)
-        streamingSpeech.value = null
+        liveSpeeches.value = []
+        activeSpeechKey.value = ''
         thinking.value = ''
       },
       onDone() {
@@ -221,7 +240,6 @@ async function runStream(payload: WerewolfStreamPayload) {
   } finally {
     busy.value = false
     thinking.value = ''
-    streamingSpeech.value = null
   }
 }
 
@@ -261,7 +279,8 @@ function resetGame() {
   selectedTarget.value = ''
   speech.value = ''
   error.value = ''
-  streamingSpeech.value = null
+  liveSpeeches.value = []
+  activeSpeechKey.value = ''
   thinking.value = ''
 }
 
@@ -540,18 +559,23 @@ function eventClass(log: WerewolfLog) {
                   </div>
                 </template>
 
-                <div v-if="streamingSpeech" class="ww-chat-row streaming">
-                  <span class="ww-chat-avatar">{{ streamingSpeech.speakerName.slice(0, 1) }}</span>
+                <div
+                  v-for="speech in liveSpeeches"
+                  :key="speech.key"
+                  class="ww-chat-row"
+                  :class="{ streaming: !speech.complete, mine: speech.speakerId === game.humanId }"
+                >
+                  <span class="ww-chat-avatar">{{ speech.speakerName.slice(0, 1) }}</span>
                   <div class="ww-chat-body">
                     <div class="ww-chat-meta">
-                      <strong>{{ streamingSpeech.speakerName }}</strong>
-                      <em>{{ aiConfigured ? 'DeepSeek 生成中' : 'Agent 生成中' }}</em>
+                      <strong>{{ speech.speakerName }}</strong>
+                      <em>{{ speech.complete ? '已发言' : aiConfigured ? 'DeepSeek 输出中' : '生成中' }}</em>
                     </div>
-                    <p class="ww-bubble">{{ streamingSpeech.text }}<span class="ww-cursor"></span></p>
+                    <p class="ww-bubble">{{ speech.text }}<span v-if="!speech.complete" class="ww-cursor"></span></p>
                   </div>
                 </div>
 
-                <div v-if="thinking && !streamingSpeech" class="ww-thinking">
+                <div v-if="thinking && !activeSpeechKey" class="ww-thinking">
                   <span class="ww-thinking-dots"><i></i><i></i><i></i></span>
                   {{ thinking }}
                 </div>
