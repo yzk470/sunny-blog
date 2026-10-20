@@ -103,6 +103,7 @@ public class AgentSkillsService {
                 if (entry.isDirectory()) continue;
                 String name = entry.getName().replace('\\', '/');
                 if (name.isBlank() || name.startsWith("__MACOSX/") || name.contains("/.")) continue;
+                if (name.contains("__pycache__") || name.endsWith(".pyc")) continue;
                 Path normalized = Path.of(name).normalize();
                 if (normalized.isAbsolute() || normalized.startsWith("..")) {
                     throw new IllegalArgumentException("zip 中包含非法路径");
@@ -251,6 +252,8 @@ public class AgentSkillsService {
         try (Stream<Path> stream = Files.walk(directory, 5)) {
             stream.filter(Files::isRegularFile)
                     .filter(p -> !p.getFileName().toString().equalsIgnoreCase("SKILL.md"))
+                    .filter(p -> !p.toString().contains("__pycache__"))
+                    .filter(p -> !p.getFileName().toString().endsWith(".pyc"))
                     .map(p -> directory.relativize(p).toString().replace('\\', '/'))
                     .sorted()
                     .limit(120)

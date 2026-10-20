@@ -10,6 +10,7 @@ public class AgentToolExecutor {
 
     private final AgentFileTools fileTools;
     private final AgentSkillsService skillsService;
+    private final AgentArtifactService artifacts;
 
     public AgentFileTools.ToolResult execute(String action, JsonNode input) {
         try {
@@ -20,10 +21,13 @@ public class AgentToolExecutor {
                     yield skillsService.find(name)
                             .map(skill -> AgentFileTools.ToolResult.ok(
                                     "技能：" + skill.name() + "\n"
-                                            + "目录：" + skill.slug() + "（read_file/run_script 时 scope=skills）\n"
+                                            + "技能根：skills/" + skill.slug()
+                                            + "（read_file/run_script 时 scope=skills，path 使用 "
+                                            + skill.slug() + "/文件名）\n"
                                             + "资源文件：\n"
                                             + (skill.resources().isEmpty() ? "（无）"
-                                            : String.join("\n", skill.resources().stream().map(r -> "- " + r).toList()))
+                                            : String.join("\n", skill.resources().stream()
+                                                    .map(r -> "- " + skill.slug() + "/" + r).toList()))
                                             + "\n\n" + skill.body()))
                             .orElseGet(() -> AgentFileTools.ToolResult.fail("技能不存在: " + name));
                 }
@@ -31,6 +35,7 @@ public class AgentToolExecutor {
                 case "write_file" -> fileTools.write(text(input, "scope"), text(input, "path"), text(input, "content"));
                 case "list_files" -> fileTools.list(text(input, "scope"), text(input, "path"));
                 case "delete_file" -> fileTools.delete(text(input, "scope"), text(input, "path"));
+                case "inspect_artifact" -> AgentFileTools.ToolResult.ok(artifacts.inspect(text(input, "path")));
                 case "run_script" -> fileTools.runScript(text(input, "scope"), text(input, "path"), text(input, "args"));
                 case "run_command" -> fileTools.runCommand(text(input, "scope"), text(input, "command"));
                 default -> AgentFileTools.ToolResult.fail("未知工具: " + action);
@@ -54,6 +59,7 @@ public class AgentToolExecutor {
                 - write_file: 写入文件。输入 {"scope":"workspace|skills|artifacts","path":"相对路径","content":"内容"}
                 - list_files: 列出目录。输入 {"scope":"workspace|skills|artifacts","path":"相对路径"}
                 - delete_file: 删除文件。输入 {"scope":"workspace|skills|artifacts","path":"相对路径"}
+                - inspect_artifact: 检查产物结构（PPT 页数/文字、Word 文字、图片尺寸、HTML 预览）。输入 {"path":"artifacts相对的路径"}
                 - run_script: 执行脚本。输入 {"scope":"workspace|skills","path":"scripts/task.py","args":"可选参数"}
                 - run_command: 执行白名单命令（python3/python/node/ls/cat/pwd/find/head/tail/wc）。输入 {"scope":"workspace|skills","command":"python3 scripts/task.py"}
                 产物（pptx/docx/xlsx/pdf/html/图片）必须写到 scope=artifacts；脚本运行时环境变量 AGENT_ARTIFACTS_DIR 指向产物目录。

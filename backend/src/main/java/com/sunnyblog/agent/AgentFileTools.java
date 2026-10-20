@@ -67,7 +67,12 @@ public class AgentFileTools {
     public ToolResult read(String scope, String relative) {
         try {
             Path path = resolve(scope, relative);
-            if (!Files.exists(path)) return ToolResult.fail("文件不存在: " + relative);
+            if (!Files.exists(path)) {
+                String hint = "skills".equalsIgnoreCase(scope)
+                        ? "；技能资源路径要包含技能目录，例如 pptx-skill/editing.md，请先 list_files"
+                        : "";
+                return ToolResult.fail("文件不存在: " + relative + hint);
+            }
             if (Files.isDirectory(path)) return ToolResult.fail("这是一个目录，请使用 list_files");
             String content = Files.readString(path, StandardCharsets.UTF_8);
             return ToolResult.ok(clip(content));
@@ -170,7 +175,9 @@ public class AgentFileTools {
         }
         if (rawCommand == null || rawCommand.isBlank()) return ToolResult.fail("命令为空");
         if (rawCommand.length() > 500) return ToolResult.fail("命令过长");
-        if (rawCommand.matches(".*[;&|><`$\\n\\r].*")) return ToolResult.fail("不允许 shell 管道、重定向或命令串联");
+        if (rawCommand.matches(".*[;&|><`$\\n\\r].*")) {
+            return ToolResult.fail("不允许 shell 管道、重定向或命令串联。请把逻辑写成 scripts/ 下的脚本，再用 run_script 执行。");
+        }
         String[] tokens = rawCommand.trim().split("\\s+");
         if (tokens.length == 0) return ToolResult.fail("命令为空");
         String executable = tokens[0];
@@ -180,7 +187,7 @@ public class AgentFileTools {
         List<String> command = new ArrayList<>();
         for (String token : tokens) {
             if (token.equals("-c") || token.equals("-e") || token.equals("--eval")) {
-                return ToolResult.fail("不允许内联代码参数，请先写入 scripts/ 下的脚本再执行");
+                return ToolResult.fail("不允许内联代码参数；请先写入 scripts/ 下的脚本，再使用 run_script / python3 scripts/x.py");
             }
             if (token.startsWith("/") || token.contains("..")) {
                 return ToolResult.fail("只允许访问 workspace/skills 内的相对路径");
