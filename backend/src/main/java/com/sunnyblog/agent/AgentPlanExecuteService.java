@@ -142,6 +142,8 @@ public class AgentPlanExecuteService {
         String system = """
                 你是任务规划器。把一个长任务拆成 2～6 个可执行步骤。
                 每一步都应当有明确产物，优先使用 agent 的文件/脚本/skill 工具。
+                所有路径必须相对于 workspace；脚本写在 workspace/scripts 下，用 run_script 执行。
+                不允许规划 /tmp、绝对路径或直接访问系统文件。
                 只输出 JSON：{"steps":["步骤1","步骤2"],"reason":"一句理由"}。
                 """;
         String user = "历史记忆：\n" + memoryContext + "\n\n任务：\n" + task;
