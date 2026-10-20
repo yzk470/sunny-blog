@@ -31,7 +31,9 @@ public class AgentReActService {
         boolean lastToolFailed = false;
         String lastExecutionOutput = "";
         Map<String, Integer> actionCounts = new HashMap<>();
-        for (int step = 0; step < Math.max(1, maxSteps); step++) {
+        int limit = Math.max(1, maxSteps);
+        for (int step = 0; step < limit; step++) {
+            int remaining = limit - step - 1;
             String user = """
                     %s
 
@@ -41,18 +43,29 @@ public class AgentReActService {
                     ## 当前任务（请优先回应这里）
                     %s
 
+                    ## 执行预算（必须遵守）
+                    这是第 %d / %d 步，剩余 %d 步。
+                    %s
+
                     请决定下一步。只输出一个 JSON 对象：
                     {"thought":"你在想什么","action":"工具名或 final","input":{...}}
                     如果任务已经完成，action 使用 final，input 为 {"answer":"给用户的最终回答"}。
                     """.formatted(memoryContext,
                     observations.isEmpty() ? "（还没有执行任何工具）" : observations,
-                    task);
+                    task,
+                    step + 1, limit, remaining,
+                    remaining == 0
+                            ? "这是最后一步，必须 action=final，不能再调用任何工具。请直接总结已完成的内容；如果信息不足就说明不足。"
+                            : remaining <= 2
+                            ? "只剩很少步数，必须开始收敛：最多再调用一次必要工具，然后立即 final。"
+                            : "请控制步数，不要重复探索；完成目标后尽早 final。");
 
-            AgentEvent status = new AgentEvent("status", "第 " + (step + 1) + " 步：模型正在判断…", "");
+            AgentEvent status = new AgentEvent("status",
+                    "第 " + (step + 1) + "/" + limit + " 步：模型正在判断…（剩余 " + remaining + " 步）", "");
             events.accept(status);
             String raw;
             try {
-                raw = llm.complete(systemPrompt(), user, 90);
+                raw = llm.complete(systemPrompt(limit), user, 90);
             } catch (Exception ex) {
                 runs.addStep(run, "ERROR", "模型调用失败", ex.getMessage(), false);
                 throw ex;
@@ -112,6 +125,13 @@ public class AgentReActService {
             }
 
             events.accept(new AgentEvent("tool_start", "调用工具 " + action, input.toString()));
+            if (remaining == 0) {
+                String warning = "这是最后一步，系统不再执行新的工具调用。";
+                observations.append("\n## 系统拦截\n").append(warning).append("\n");
+                record(run, "ERROR", "最后一步拒绝工具调用", warning, false);
+                events.accept(new AgentEvent("status", warning, ""));
+                break;
+            }
             String actionKey = action + ":" + input;
             int actionCount = actionCounts.merge(actionKey, 1, Integer::sum);
             if (actionCount > 2) {
@@ -155,13 +175,16 @@ public class AgentReActService {
         return "任务执行步数已达到上限，但没有得到最终回答。请缩小任务范围再试。";
     }
 
-    public String systemPrompt() {
+    public String systemPrompt(int maxSteps) {
         return """
                 你是「月白小筑」博客里的智能体，名字叫月白。
                 你擅长理解需求、拆解任务、写 Python/JavaScript 脚本、调用技能并给出可执行结果。
                 你只能通过工具观察世界，不能假装执行过命令或读取过文件。
+                单轮任务最多有 %d 步（一次模型判断算一步，一次工具执行也算一步）。
+                你必须在步数用完之前 action=final。不要等系统提示“步数上限”才结束。
+                剩余 2 步时停止探索、只做必要收尾；剩余 1 步时必须直接 final 总结，不允许再调用工具。
                 如果任务要求运行脚本或命令，必须实际调用 run_script / run_command 并读取真实输出，不能用文字声称结果。
-                如果工具返回 ERROR，必须分析错误、修改代码或路径后重试；最多重试直到任务完成。
+                如果工具返回 ERROR，必须分析错误、修改代码或路径后重试；但要注意剩余步数。
                 严格规则：不要直接使用 run_command 执行 shell 逻辑。请把逻辑写成 scripts/ 下的 .py 或 .js 脚本，再用 run_script 执行。
                 禁止在 run_command 中使用管道 |、重定向 >、&、;、内联代码 -c/-e 或命令串联；run_command 只用于简单只读检查。
                 所有文件路径都必须相对于 workspace、skills 或 artifacts；
@@ -181,7 +204,7 @@ public class AgentReActService {
 
                 %s
                 需要知识库资料时调用 search_knowledge；它会先向量粗检索，再由独立 rerank Agent 过滤。
-                """.formatted(tools.catalog(), skills.catalog(), tools.knowledgeHint());
+                """.formatted(maxSteps, tools.catalog(), skills.catalog(), tools.knowledgeHint());
     }
 
     private boolean looksLikeToolMarkup(String raw) {
