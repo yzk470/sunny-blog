@@ -260,7 +260,7 @@ public class AgentOrchestrator {
 
             if (isCancelled(run)) return pauseAttempt(session, run, mode, attempt, events);
             int spent = "plan".equals(mode)
-                    ? Math.max(1, checkpoint.getPlan().getPlanIndex() * 8)
+                    ? Math.max(8, checkpoint.getPlan().getPlanIndex() * 8)
                     : Math.max(1, checkpoint.getReact().getStep());
             int budgetDelta = Math.max(0, spent - attempt.getBudgetSpent());
             attempt.setBudgetSpent(Math.max(attempt.getBudgetSpent(), spent));
@@ -359,7 +359,7 @@ public class AgentOrchestrator {
         if (attempt != null) {
             AgentRunService.Checkpoint checkpoint = run.getCheckpoint();
             int spent = "plan".equals(mode)
-                    ? Math.max(1, checkpoint.getPlan().getPlanIndex() * 8)
+                    ? Math.max(8, checkpoint.getPlan().getPlanIndex() * 8)
                     : Math.max(1, checkpoint.getReact().getStep());
             int delta = Math.max(0, spent - attempt.getBudgetSpent());
             attempt.setBudgetSpent(Math.max(attempt.getBudgetSpent(), spent));
