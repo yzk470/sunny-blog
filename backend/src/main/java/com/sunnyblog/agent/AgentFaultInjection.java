@@ -75,9 +75,19 @@ public final class AgentFaultInjection {
 
     public static boolean takeValidatorFailure() {
         State state = CURRENT.get();
-        if (state == null || state.validatorConsumed || !"LOGIC".equals(state.type)) return false;
+        if (state == null || state.validatorConsumed) return false;
+        if (!"ENVIRONMENT".equals(state.type) && !"TRANSIENT".equals(state.type)
+                && !"TOOL".equals(state.type) && !"FORMAT".equals(state.type)
+                && !"LOGIC".equals(state.type)) {
+            return false;
+        }
         state.validatorConsumed = true;
         return true;
+    }
+
+    public static String failureType() {
+        State state = CURRENT.get();
+        return state == null ? "LOGIC" : state.type;
     }
 
     public static int budgetOverride(int normal) {

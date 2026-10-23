@@ -620,7 +620,8 @@ public class AgentOrchestrator {
             return new Verdict(false, "任务要求真实执行，但当前路线没有成功运行脚本或命令", "TOOL");
         }
         if (AgentFaultInjection.takeValidatorFailure()) {
-            return new Verdict(false, "模拟验收失败：结果不完整", "LOGIC");
+            return new Verdict(false, "模拟 " + AgentFaultInjection.failureType() + " 故障：验收未通过",
+                    AgentFaultInjection.failureType());
         }
         Validation validation = validate(question, answer,
                 artifacts.manifestRun(run.getId()) + executionEvidenceBlock(attempt),

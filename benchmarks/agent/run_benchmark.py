@@ -161,6 +161,8 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
             failures.append("unsat-not-declared")
         if artifact_paths:
             failures.append("unsat-produced-artifact")
+    elif task.get("fault") and not attempt_success:
+        failures.append("no-success-attempt")
 
     return {
         "task": task["id"],
