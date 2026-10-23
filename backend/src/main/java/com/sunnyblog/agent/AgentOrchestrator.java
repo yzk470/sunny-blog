@@ -146,6 +146,11 @@ public class AgentOrchestrator {
         int index = checkpoint.getStrategyIndex();
         AgentRunService.AttemptRecord attempt = null;
         AgentRunService.AttemptRecord last = lastAttempt(checkpoint);
+        if (last != null && "SUCCESS".equals(last.getStatus())
+                && last.getAnswer() != null && !last.getAnswer().isBlank()) {
+            return finishSuccess(session, run, mode, last.getAnswer(),
+                    "从已完成尝试恢复", events);
+        }
         if (last != null && isResumable(last)) {
             int found = findStrategyIndex(checkpoint, last.getStrategyId());
             if (found >= 0) {
@@ -184,7 +189,7 @@ public class AgentOrchestrator {
             }
             int remaining = checkpoint.getTaskBudget() - checkpoint.getTaskSpent();
             if (remaining < 4) break;
-            int allocation = Math.min(12, remaining);
+            int allocation = "plan".equals(mode) ? Math.min(24, remaining) : Math.min(12, remaining);
             attempt.setBudgetAllocated(allocation);
             attempt.setStatus("RUNNING");
             AgentTaskContext.set(session.getId(), run.getId(), attempt.getId());
@@ -194,7 +199,7 @@ public class AgentOrchestrator {
                 if ("plan".equals(mode)) {
                     checkpoint.setPhase("plan");
                     runs.checkpoint(run);
-                    answer = planExecute.run(attemptTask, memoryContext, run, events);
+                    answer = planExecute.run(attemptTask, memoryContext, run, events, allocation);
                 } else {
                     checkpoint.setPhase("react");
                     runs.checkpoint(run);

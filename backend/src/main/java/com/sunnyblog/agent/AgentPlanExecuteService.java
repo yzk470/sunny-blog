@@ -26,6 +26,12 @@ public class AgentPlanExecuteService {
 
     public String run(String task, String memoryContext, AgentRunService.AgentRun run,
                       java.util.function.Consumer<AgentEvent> events) {
+        return run(task, memoryContext, run, events, 48);
+    }
+
+    public String run(String task, String memoryContext, AgentRunService.AgentRun run,
+                      java.util.function.Consumer<AgentEvent> events, int attemptBudget) {
+        int budget = Math.max(8, attemptBudget);
         AgentRunService.Checkpoint checkpoint = run.getCheckpoint();
         if (checkpoint == null) {
             checkpoint = new AgentRunService.Checkpoint();
@@ -45,6 +51,10 @@ public class AgentPlanExecuteService {
             List<String> steps = (List<String>) planned.get("plan");
             plan.setPlan(new ArrayList<>(steps));
             plan.setPlanIndex(0);
+            int maxSteps = Math.max(1, Math.min(6, budget / 8));
+            if (plan.getPlan().size() > maxSteps) {
+                plan.setPlan(new ArrayList<>(plan.getPlan().subList(0, maxSteps)));
+            }
             runs.checkpoint(run);
         }
 
@@ -105,7 +115,8 @@ public class AgentPlanExecuteService {
                     %s
                     """.formatted(task, i + 1, plan.getPlan().size(), step,
                     plan.getResults().isBlank() ? "（无）" : plan.getResults());
-            String answer = react.run(stepTask, memoryContext, run, plan.getCurrent(), events, 8);
+            String answer = react.run(stepTask, memoryContext, run, plan.getCurrent(),
+                    events, Math.max(2, Math.min(8, budget - i * 8)));
             if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
                 plan.setPaused(true);
                 runs.checkpoint(run);

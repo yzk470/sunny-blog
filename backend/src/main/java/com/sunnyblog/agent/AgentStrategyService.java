@@ -58,7 +58,17 @@ public class AgentStrategyService {
                 String criteria = json.path("successCriteria").asText("");
                 if (strategies.isEmpty()) strategies = fallback(task);
                 if (criteria.isBlank()) criteria = defaultCriteria(task);
-                return new StrategyPlan(criteria, distinct(strategies), budget);
+                List<AgentRunService.Strategy> distinct = distinct(strategies);
+                if (distinct.size() < 2) {
+                    for (AgentRunService.Strategy extra : fallback(task)) {
+                        if (distinct.size() >= 2) break;
+                        if (distinct.stream().noneMatch(s -> s.getTitle().equals(extra.getTitle()))) {
+                            extra.setId("s" + (distinct.size() + 1));
+                            distinct.add(extra);
+                        }
+                    }
+                }
+                return new StrategyPlan(criteria, distinct, budget);
             } catch (Exception ignored) {
                 // Fall through to deterministic strategies.
             }
