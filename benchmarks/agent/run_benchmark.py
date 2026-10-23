@@ -139,9 +139,17 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
     for needle in checks.get("contains", []):
         if needle not in answer:
             failures.append(f"missing:{needle}")
-    for ext in checks.get("artifactExt", []):
-        if not any(path.lower().endswith("." + ext.lower()) for path in artifact_paths):
-            failures.append(f"artifact:.{ext}")
+    for needle in checks.get("containsAny", []):
+        if not any(item in answer for item in checks["containsAny"]):
+            failures.append(f"missing-any:{needle}")
+            break
+    if checks.get("minLength") and len(answer) < int(checks["minLength"]):
+        failures.append(f"answer<{checks['minLength']}chars")
+    extension_checks = checks.get("artifactExt", [])
+    if extension_checks:
+        if not any(any(path.lower().endswith("." + str(ext).lower()) for ext in extension_checks)
+                   for path in artifact_paths):
+            failures.append(f"artifact:any({','.join(str(e) for e in extension_checks)})")
     if checks.get("execution") and not execution_ok:
         failures.append("execution-not-confirmed")
     if checks.get("maxSeconds") and duration > checks["maxSeconds"]:
@@ -198,10 +206,14 @@ def main() -> int:
     parser.add_argument("--variants", default="linear,static,dynamic")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=360)
+    parser.add_argument("--task-ids", default="")
     parser.add_argument("--report-dir", default=str(ROOT / "reports"))
     args = parser.parse_args()
 
     tasks = json.loads(Path(args.tasks).read_text(encoding="utf-8"))
+    if args.task_ids:
+        keep = {item.strip() for item in args.task_ids.split(",") if item.strip()}
+        tasks = [task for task in tasks if task["id"] in keep]
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
     rows: list[dict[str, Any]] = []
     for variant in variants:

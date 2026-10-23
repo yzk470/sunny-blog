@@ -25,9 +25,9 @@
   },
   {
     "id": "plan-three-points",
-    "message": "先写一句介绍，再列出三个要点。不要生成文件。",
+    "message": "请只输出三行，每行以 1. 2. 3. 开头，每行写一句关于阅读的建议，不要生成文件。",
     "mode": "plan",
-    "checks": { "contains": ["要点"], "maxSeconds": 240 }
+    "checks": { "contains": ["1.", "2.", "3."], "minLength": 30, "maxSeconds": 240 }
   },
   {
     "id": "high-value-design",

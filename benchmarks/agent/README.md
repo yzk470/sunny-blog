@@ -80,3 +80,36 @@ benchmarks/agent/reports/latest.md
 - LLM 输出具有随机性，单轮结果仅供参考，建议多轮。
 - 高价值任务（如系统设计）会启用更贵的最佳优先搜索。
 - 失败注入的单元测试在 `AgentSearchTest`；该 runner 负责真实端到端任务指标。
+
+## 首轮结果（5 个基础任务，单轮）
+
+| Variant | Success | First attempt | Recovered | Avg attempts | Avg budget | Cost/success | P95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| linear | 100% | 4 | 1 | 1.0 | 9.4 | 9.4 | 30.1s |
+| static | 100% | 3 | 2 | 1.6 | 17.8 | 17.8 | 71.3s |
+| dynamic | 100% | 4 | 1 | 1.2 | 12.6 | 12.6 | 35.9s |
+
+结论：基础任务太简单，三种策略都能完成；静态搜索和动态搜索的成本更高，但首轮样本没有体现成功率收益。
+
+高价值系统设计任务单轮抽样：
+
+```text
+linear:  1 次尝试，预算 16，约 155s，成功
+static:  2 次尝试，预算 48，约 313s，成功
+dynamic: 1 次尝试，预算 32，约 123s，成功
+```
+
+同样只有 1 个样本，不能据此断言动态搜索更优。要得到可信结论，应：
+
+```text
+增加失败注入任务（依赖缺失、权限、超时、格式错误）
+每个任务重复 3 次以上
+分别统计成功率、恢复率、成本和 P95
+```
+
+报告文件：
+
+```text
+benchmarks/agent/reports/latest.md
+benchmarks/agent/reports/latest.json
+```
