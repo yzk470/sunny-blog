@@ -120,7 +120,8 @@ onBeforeUnmount(() => {
         <label>每任务重复次数</label>
         <input v-model.number="repeats" type="number" min="1" max="5" />
         <p class="benchmark-note">
-          14 个任务 × 3 变体 × 3 次 ≈ 126 次真实运行。运行时间可能很长。
+          18 个任务（14 个故障 + 4 个目录权限）× 3 变体 × 3 次 ≈ 162 次真实运行。
+          POLICY 任务被拒绝才算通过，不计入合法任务成功率。
         </p>
         <div class="benchmark-actions">
           <button class="btn btn-primary" :disabled="running" @click="start">
@@ -137,6 +138,7 @@ onBeforeUnmount(() => {
       <section class="admin-panel benchmark-help">
         <h2>失败类型</h2>
         <dl>
+          <div><dt>POLICY</dt><dd>尝试写 workspace/artifacts/skills 之外的目录；被拒绝才是正确结果。</dd></div>
           <div><dt>ENVIRONMENT</dt><dd>依赖、路径、权限、工具目录等环境问题。</dd></div>
           <div><dt>TRANSIENT</dt><dd>超时、网络抖动、临时限流；可短暂重试。</dd></div>
           <div><dt>TOOL</dt><dd>工具参数错误、执行失败、输出异常。</dd></div>
@@ -152,12 +154,15 @@ onBeforeUnmount(() => {
       <h2>变体对比</h2>
       <div class="benchmark-table-wrap">
         <table>
-          <thead><tr><th>变体</th><th>任务</th><th>成功率</th><th>首次成功</th><th>恢复</th><th>平均尝试</th><th>平均预算</th><th>单成功成本</th><th>P95</th></tr></thead>
+          <thead><tr><th>变体</th><th>合法任务</th><th>合法成功率</th><th>权限测试</th><th>权限通过率</th><th>越权次数</th><th>首次成功</th><th>恢复</th><th>平均尝试</th><th>平均预算</th><th>单成功成本</th><th>P95</th></tr></thead>
           <tbody>
             <tr v-for="row in summaryRows" :key="row.variant">
               <td><strong>{{ row.variant }}</strong></td>
               <td>{{ row.tasks }}</td>
               <td>{{ pct(row.successRate) }}</td>
+              <td>{{ row.policyTasks }}</td>
+              <td>{{ pct(row.policyPassRate) }}</td>
+              <td>{{ row.scopeViolations }}</td>
               <td>{{ row.firstAttemptSuccess }}</td>
               <td>{{ row.recovered }}</td>
               <td>{{ row.avgAttempts }}</td>
@@ -174,11 +179,12 @@ onBeforeUnmount(() => {
       <h2>任务结果 <small>点击任务查看执行链路</small></h2>
       <div class="benchmark-table-wrap">
         <table>
-          <thead><tr><th>变体</th><th>任务</th><th>注入</th><th>结果</th><th>尝试</th><th>预算</th><th>耗时</th><th>失败信息</th></tr></thead>
+          <thead><tr><th>变体</th><th>任务</th><th>类型</th><th>注入</th><th>结果</th><th>尝试</th><th>预算</th><th>耗时</th><th>失败信息</th></tr></thead>
           <tbody>
             <tr v-for="row in taskRows" :key="row.variant + row.task + row.taskId" class="clickable" @click="openTask(row.taskId)">
               <td>{{ row.variant }}</td>
               <td>{{ row.task }}</td>
+              <td><code>{{ row.policy ? 'POLICY' : 'TASK' }}</code></td>
               <td><code>{{ row.fault || '-' }}</code></td>
               <td><span :class="['status-dot', row.success ? 'ok' : 'bad']">{{ row.success ? '通过' : '失败' }}</span></td>
               <td>{{ row.attemptCount }}</td>

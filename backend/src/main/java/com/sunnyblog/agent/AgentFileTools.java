@@ -274,7 +274,8 @@ public class AgentFileTools {
         Path root = rootFor(scope);
         if (relative == null) relative = "";
         Path path = root.resolve(relative).normalize();
-        if (!path.startsWith(root)) throw new IllegalArgumentException("非法路径: " + relative);
+        if (!path.startsWith(root)) throw new IllegalArgumentException(
+                "POLICY_DENIED: 非法路径（只允许 workspace/artifacts/skills）: " + relative);
         return path;
     }
 

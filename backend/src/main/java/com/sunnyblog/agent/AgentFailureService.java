@@ -21,6 +21,10 @@ public class AgentFailureService {
     public String classify(String answer, String failureOutput) {
         String text = (answer == null ? "" : answer) + "\n" + (failureOutput == null ? "" : failureOutput);
         String lower = text.toLowerCase(Locale.ROOT);
+        if (lower.contains("policy_denied") || lower.contains("非法路径")
+                || lower.contains("outside allowed") || lower.contains("越权")) {
+            return "POLICY";
+        }
         if (lower.contains("module not found") || lower.contains("modulenotfounderror")
                 || lower.contains("no such file") || lower.contains("not found")
                 || lower.contains("permission") || lower.contains("invalid agent directory")
@@ -63,7 +67,14 @@ public class AgentFailureService {
         String assumption = "当前路线的关键假设未验证";
         String evidence = failureReason == null ? "" : failureReason;
         String global = "";
-        if ("ENVIRONMENT".equals(failureType)) {
+        if ("POLICY".equals(failureType)) {
+            assumption = "目标路径在允许目录内";
+            forbidden.add("不要写 workspace、artifacts、skills 之外的路径");
+            preconditions.add("所有路径必须先确认位于 workspace/artifacts/skills");
+            repairs.add("scope_path:改用 workspace/scripts 或 artifacts 下的相对路径");
+            repairs.add("ask_user:说明目录限制并请求允许的落盘位置");
+            global = "硬约束：只能修改 workspace、artifacts、skills 三个目录；越权时明确说明限制。";
+        } else if ("ENVIRONMENT".equals(failureType)) {
             assumption = "环境/依赖可用";
             preconditions.add("先检查工具、依赖、路径和权限");
             repairs.add("switch_tool:换一种不依赖当前环境的实现");
@@ -91,8 +102,8 @@ public class AgentFailureService {
             repairs.add("decompose:拆成更小的可验证步骤");
             repairs.add("switch_strategy:换一种实现思路");
         }
-        if (strategy != null && ("ENVIRONMENT".equals(failureType) || "UNSAT".equals(failureType)
-                || "LOGIC".equals(failureType))) {
+        if (strategy != null && ("POLICY".equals(failureType) || "ENVIRONMENT".equals(failureType)
+                || "UNSAT".equals(failureType) || "LOGIC".equals(failureType))) {
             invalidates.add(strategy.getId());
         }
         if (!llm.isConfigured()) {
@@ -156,6 +167,7 @@ public class AgentFailureService {
 
     private String fallbackSummary(String failureType) {
         return switch (failureType) {
+            case "POLICY" -> "这次失败是目录越权；下一次只能写 workspace、artifacts、skills，越权时明确说明限制。";
             case "ENVIRONMENT" -> "这次失败是环境/依赖问题；下一次先预检路径、依赖和权限，再换实现路线。";
             case "TRANSIENT" -> "这次失败可能是瞬时故障；下一次先重试一次，仍失败再换路线。";
             case "FORMAT" -> "这次失败是输出格式问题；下一次严格按要求格式输出。";

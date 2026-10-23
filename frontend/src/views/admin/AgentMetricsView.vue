@@ -80,6 +80,7 @@ function formatDuration(ms: number) {
 function failureLabel(value: string) {
   return {
     ENVIRONMENT: '环境/依赖',
+    POLICY: '目录越权',
     TRANSIENT: '瞬时故障',
     TOOL: '工具失败',
     FORMAT: '格式错误',
@@ -106,7 +107,7 @@ onMounted(load)
       <div>
         <p class="section-eyebrow">AGENT ANALYTICS</p>
         <h1>执行统计</h1>
-        <p>成功率、重试率、预算成本、失败类型和高价值搜索分支。</p>
+        <p>原始任务完成率、重试率、预算成本、失败类型和高价值搜索分支；目录越权单列为 POLICY。</p>
       </div>
       <div class="metrics-actions">
         <select v-model.number="days" @change="load">
@@ -120,7 +121,7 @@ onMounted(load)
 
     <div v-if="summary" class="metric-cards">
       <article><span>任务总数</span><strong>{{ summary.tasks }}</strong></article>
-      <article><span>成功率</span><strong>{{ percent(summary.successRate) }}</strong></article>
+      <article><span>原始完成率</span><strong>{{ percent(summary.successRate) }}</strong></article>
       <article><span>重试率</span><strong>{{ percent(summary.retryRate) }}</strong></article>
       <article><span>平均预算</span><strong>{{ summary.averageSteps.toFixed(1) }}</strong></article>
       <article><span>尝试次数</span><strong>{{ summary.attempts }}</strong></article>

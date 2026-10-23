@@ -82,6 +82,14 @@ public class AgentReActService {
                     这是第 %d / %d 步，剩余 %d 步。
                     %s
 
+                    ## 目录权限（硬约束）
+                    只允许修改以下三个根目录：
+                    - workspace：脚本、输入、中间文件（脚本放 workspace/scripts）
+                    - artifacts：最终产物
+                    - skills：技能资源
+                    禁止写 /tmp、/etc、/opt 或任何其他目录；不允许用 ../ 跳出根目录。
+                    任务要求越权目录时，必须明确说明限制，不能伪造成功。
+
                     %s
 
                     请决定下一步。只输出一个 JSON 对象：

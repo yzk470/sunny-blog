@@ -79,6 +79,7 @@ class AgentSearchTest {
                 "ModuleNotFoundError: No module named 'pptx'", ""));
         assertEquals("TRANSIENT", failures.classify("request timed out", ""));
         assertEquals("LOGIC", failures.classify("验收未通过：结果不完整", ""));
+        assertEquals("POLICY", failures.classify("POLICY_DENIED: 非法路径（只允许 workspace/artifacts/skills）", ""));
 
         AgentRunService.AttemptRecord attempt = new AgentRunService.AttemptRecord();
         attempt.setStrategyTitle("python-pptx");
