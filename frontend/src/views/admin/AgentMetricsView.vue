@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   agentApi,
+  type AgentBenchmarkStatus,
   type AgentFailureRow,
   type AgentMetricTask,
   type AgentMetrics,
@@ -19,10 +20,25 @@ const trend = ref<AgentTrendRow[]>([])
 const failures = ref<AgentFailureRow[]>([])
 const tasks = ref<AgentMetricTask[]>([])
 const failureFilter = ref('')
+const benchmarkStatus = ref<AgentBenchmarkStatus | null>(null)
 
 const maxFailure = computed(() => Math.max(1, ...failures.value.map((item) => item.count)))
 const maxTasks = computed(() => Math.max(1, ...trend.value.map((item) => item.tasks)))
 const filterLabel = computed(() => failureFilter.value ? failureLabel(failureFilter.value) : '')
+const policyFailures = computed(() => failures.value.find((item) => item.failure_type === 'POLICY')?.count || 0)
+const benchmarkReport = computed(() => {
+  if (!benchmarkStatus.value?.report) return null
+  try {
+    return JSON.parse(benchmarkStatus.value.report)
+  } catch {
+    return null
+  }
+})
+const benchmarkSummary = computed<any>(() => {
+  const summary = benchmarkReport.value?.summary
+  return summary ? Object.values(summary)[0] : null
+})
+const benchmarkGroup = computed(() => benchmarkReport.value?.group || '')
 
 async function load() {
   loading.value = true
@@ -36,6 +52,11 @@ async function load() {
     trend.value = t
     failures.value = f
     await loadTasks()
+    try {
+      benchmarkStatus.value = await agentApi.benchmarkStatus()
+    } catch {
+      benchmarkStatus.value = null
+    }
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '加载执行统计失败', 'error')
   } finally {
@@ -119,6 +140,24 @@ onMounted(load)
       </div>
     </div>
 
+    <section class="admin-panel benchmark-mini">
+      <div class="panel-head">
+        <h2>最近基准测试
+          <small v-if="benchmarkGroup">· {{ benchmarkGroup === 'security' ? '安全防护' : benchmarkGroup === 'capability' ? '能力稳定性' : '混合' }}</small>
+        </h2>
+        <RouterLink :to="{ name: 'admin-agent-benchmark' }">去运行基准 →</RouterLink>
+      </div>
+      <div v-if="benchmarkSummary" class="benchmark-mini-grid">
+        <article><span>能力任务</span><strong>{{ benchmarkSummary.tasks }}</strong></article>
+        <article><span>能力成功率</span><strong>{{ percent(benchmarkSummary.successRate) }}</strong></article>
+        <article><span>安全测试</span><strong>{{ benchmarkSummary.securityTasks }}</strong></article>
+        <article><span>安全通过率</span><strong>{{ benchmarkSummary.securityTasks ? percent(benchmarkSummary.securityPassRate) : '-' }}</strong></article>
+        <article><span>越权次数</span><strong>{{ benchmarkSummary.scopeViolations }}</strong></article>
+        <article><span>失败恢复</span><strong>{{ benchmarkSummary.recovered }}</strong></article>
+      </div>
+      <p v-else class="benchmark-mini-empty">还没有基准结果。执行统计的原始完成率不区分能力测试和安全测试。</p>
+    </section>
+
     <div v-if="summary" class="metric-cards">
       <article><span>任务总数</span><strong>{{ summary.tasks }}</strong></article>
       <article><span>原始完成率</span><strong>{{ percent(summary.successRate) }}</strong></article>
@@ -126,6 +165,7 @@ onMounted(load)
       <article><span>平均预算</span><strong>{{ summary.averageSteps.toFixed(1) }}</strong></article>
       <article><span>尝试次数</span><strong>{{ summary.attempts }}</strong></article>
       <article><span>失败尝试</span><strong>{{ summary.failedAttempts }}</strong></article>
+      <article><span>目录越权拒绝</span><strong>{{ policyFailures }}</strong></article>
       <article><span>高价值任务</span><strong>{{ summary.highValueTasks }}</strong></article>
       <article><span>分支展开</span><strong>{{ summary.branchesExpanded }}</strong></article>
     </div>
@@ -196,12 +236,20 @@ onMounted(load)
 .agent-metrics { padding-bottom: 40px; }
 .metrics-actions { display: flex; gap: 8px; align-items: center; }
 .metrics-actions select { padding: 7px 9px; border: 1px solid rgba(103, 126, 146, 0.2); border-radius: 8px; background: #fff; color: #4a6072; font: inherit; font-size: 11px; }
-.metric-cards { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 9px; margin-bottom: 18px; }
+.metric-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 9px; margin-bottom: 18px; }
 .metric-cards article { padding: 12px; border: 1px solid rgba(98, 119, 139, 0.12); border-radius: 12px; background: #fff; }
 .metric-cards span { display: block; color: #95a0a9; font-size: 9px; }
 .metric-cards strong { display: block; margin-top: 4px; color: #3a5368; font-size: 18px; }
 .metrics-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
 .admin-panel { padding: 15px; border: 1px solid rgba(98, 119, 139, 0.13); border-radius: 15px; background: #fff; }
+.benchmark-mini { margin-bottom: 18px; }
+.benchmark-mini .panel-head a { color: #9a6a52; font-size: 10px; text-decoration: none; }
+.benchmark-mini .panel-head h2 small { color: #9a6a52; font-size: 9px; font-weight: 400; }
+.benchmark-mini-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(95px, 1fr)); gap: 8px; }
+.benchmark-mini-grid article { padding: 9px; border-radius: 10px; background: #f8fafb; }
+.benchmark-mini-grid span { display: block; color: #95a0a9; font-size: 9px; }
+.benchmark-mini-grid strong { display: block; margin-top: 3px; color: #4a6072; font-size: 15px; }
+.benchmark-mini-empty { margin: 0; color: #9aa7b1; font-size: 10px; }
 .panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; }
 .panel-head h2 { margin: 0; color: #3b5266; font-size: 14px; }
 .panel-head span { color: #9ba5ad; font-size: 9px; }
