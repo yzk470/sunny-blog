@@ -54,6 +54,7 @@ exec /usr/bin/systemd-run \
   --property=ProtectSystem=strict \
   --property=ProtectHome=yes \
   --property=PrivateTmp=yes \
+  --property=ReadOnlyPaths=/tmp \
   --property=PrivateDevices=yes \
   --property=NoNewPrivileges=yes \
   --property=ProtectKernelTunables=yes \
@@ -74,6 +75,6 @@ exec /usr/bin/systemd-run \
   --setenv=AGENT_WORKSPACE_DIR="$workspace" \
   --setenv=AGENT_SKILLS_DIR="$skills" \
   --setenv=AGENT_ARTIFACTS_DIR="$artifacts" \
-  --setenv=HOME=/tmp \
+  --setenv=HOME="$workspace" \
   --working-directory="$cwd" \
   -- "$@"
