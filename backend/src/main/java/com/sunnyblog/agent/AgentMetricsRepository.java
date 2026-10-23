@@ -236,21 +236,38 @@ public class AgentMetricsRepository {
     }
 
     public List<TaskRow> recentTasks(int limit) {
+        return recentTasks(limit, "");
+    }
+
+    public List<TaskRow> recentTasks(int limit, String failureType) {
         try {
-            return jdbc.query("""
+            boolean filter = failureType != null && !failureType.isBlank();
+            String sql = """
                     SELECT run_id, session_id, mode, high_value, status, task_budget, task_spent,
                            attempt_count, failed_attempt_count, branch_expanded, success, duration_ms, created_at
-                    FROM agent_task_metric ORDER BY created_at DESC LIMIT ?
-                    """, (rs, rowNum) -> new TaskRow(
-                    rs.getString("run_id"), rs.getString("session_id"), rs.getString("mode"),
-                    rs.getBoolean("high_value"), rs.getString("status"), rs.getInt("task_budget"),
-                    rs.getInt("task_spent"), rs.getInt("attempt_count"),
-                    rs.getInt("failed_attempt_count"), rs.getInt("branch_expanded"),
-                    rs.getBoolean("success"), rs.getLong("duration_ms"),
-                    String.valueOf(rs.getTimestamp("created_at"))), Math.max(1, limit));
+                    FROM agent_task_metric t
+                    WHERE 1 = 1
+                    """ + (filter
+                    ? " AND EXISTS (SELECT 1 FROM agent_attempt_metric a WHERE a.run_id = t.run_id AND a.failure_type = ?) "
+                    : "") + " ORDER BY created_at DESC LIMIT ?";
+            if (filter) {
+                return jdbc.query(sql, (rs, rowNum) -> mapTaskRow(rs),
+                        failureType.trim().toUpperCase(), Math.max(1, limit));
+            }
+            return jdbc.query(sql, (rs, rowNum) -> mapTaskRow(rs), Math.max(1, limit));
         } catch (Exception ex) {
             return List.of();
         }
+    }
+
+    private TaskRow mapTaskRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new TaskRow(
+                rs.getString("run_id"), rs.getString("session_id"), rs.getString("mode"),
+                rs.getBoolean("high_value"), rs.getString("status"), rs.getInt("task_budget"),
+                rs.getInt("task_spent"), rs.getInt("attempt_count"),
+                rs.getInt("failed_attempt_count"), rs.getInt("branch_expanded"),
+                rs.getBoolean("success"), rs.getLong("duration_ms"),
+                String.valueOf(rs.getTimestamp("created_at")));
     }
 
     private void rollup(LocalDate day) {

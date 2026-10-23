@@ -95,4 +95,8 @@ public class AgentMetricsService {
     public List<AgentMetricsRepository.TaskRow> recentTasks(int limit) {
         return repository.recentTasks(limit);
     }
+
+    public List<AgentMetricsRepository.TaskRow> recentTasks(int limit, String failureType) {
+        return repository.recentTasks(limit, failureType);
+    }
 }

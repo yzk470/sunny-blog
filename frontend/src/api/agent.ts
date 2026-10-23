@@ -280,8 +280,10 @@ export const agentApi = {
   metricsFailures(days = 30) {
     return httpGet<AgentFailureRow[]>(`/admin/agent/metrics/failures?days=${days}`)
   },
-  metricsTasks(limit = 20) {
-    return httpGet<AgentMetricTask[]>(`/admin/agent/metrics/tasks?limit=${limit}`)
+  metricsTasks(limit = 20, failureType = '') {
+    const query = new URLSearchParams({ limit: String(limit) })
+    if (failureType) query.set('failureType', failureType)
+    return httpGet<AgentMetricTask[]>(`/admin/agent/metrics/tasks?${query.toString()}`)
   },
   startBenchmark(payload: { variants: string; repeats: number; taskIds?: string[] }) {
     return httpPost<AgentBenchmarkStatus>('/admin/agent/benchmark/start', payload)

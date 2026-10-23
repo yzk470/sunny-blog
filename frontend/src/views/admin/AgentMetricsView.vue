@@ -18,28 +18,47 @@ const summary = ref<AgentMetrics | null>(null)
 const trend = ref<AgentTrendRow[]>([])
 const failures = ref<AgentFailureRow[]>([])
 const tasks = ref<AgentMetricTask[]>([])
+const failureFilter = ref('')
 
 const maxFailure = computed(() => Math.max(1, ...failures.value.map((item) => item.count)))
 const maxTasks = computed(() => Math.max(1, ...trend.value.map((item) => item.tasks)))
+const filterLabel = computed(() => failureFilter.value ? failureLabel(failureFilter.value) : '')
 
 async function load() {
   loading.value = true
   try {
-    const [s, t, f, r] = await Promise.all([
+    const [s, t, f] = await Promise.all([
       agentApi.metricsSummary(days.value),
       agentApi.metricsTrend(days.value),
       agentApi.metricsFailures(days.value),
-      agentApi.metricsTasks(20),
     ])
     summary.value = s
     trend.value = t
     failures.value = f
-    tasks.value = r
+    await loadTasks()
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '加载执行统计失败', 'error')
   } finally {
     loading.value = false
   }
+}
+
+async function loadTasks() {
+  try {
+    tasks.value = await agentApi.metricsTasks(20, failureFilter.value)
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : '加载任务失败', 'error')
+  }
+}
+
+async function selectFailure(type: string) {
+  failureFilter.value = failureFilter.value === type ? '' : type
+  await loadTasks()
+}
+
+async function clearFailure() {
+  failureFilter.value = ''
+  await loadTasks()
 }
 
 function percent(value: number) {
@@ -130,7 +149,9 @@ onMounted(load)
       <section class="admin-panel">
         <div class="panel-head"><h2>失败类型</h2><span>{{ failures.length }} 类</span></div>
         <p v-if="!failures.length" class="metrics-empty">暂无失败记录。</p>
-        <div v-for="item in failures" :key="item.failure_type" class="failure-row">
+        <div v-for="item in failures" :key="item.failure_type"
+             class="failure-row clickable" :class="{ active: failureFilter === item.failure_type }"
+             @click="selectFailure(item.failure_type)">
           <div class="failure-label">
             <strong>{{ failureLabel(item.failure_type) }}</strong>
             <small>{{ item.failure_type }}</small>
@@ -142,7 +163,11 @@ onMounted(load)
     </div>
 
     <section class="admin-panel metrics-tasks">
-      <div class="panel-head"><h2>最近任务</h2><span>按时间倒序</span></div>
+      <div class="panel-head">
+        <h2>最近任务 <small v-if="failureFilter">· {{ filterLabel }}</small></h2>
+        <button v-if="failureFilter" type="button" class="clear-filter" @click="clearFailure">清除筛选</button>
+        <span v-else>按时间倒序 · 点击任务查看链路</span>
+      </div>
       <p v-if="!tasks.length" class="metrics-empty">还没有任务指标。</p>
       <div v-else class="metrics-table-wrap">
         <table>
@@ -187,7 +212,12 @@ onMounted(load)
 .trend-bar.success { background: #6ca58d; }
 .trend-bar.total { background: #e2b8a9; }
 .trend-cost { color: #9aa4ac; font-size: 9px; text-align: right; }
-.failure-row { display: grid; grid-template-columns: 100px 1fr 24px; gap: 8px; align-items: center; margin: 8px 0; }
+.failure-row { display: grid; grid-template-columns: 100px 1fr 24px; gap: 8px; align-items: center; margin: 8px 0; padding: 3px 5px; border-radius: 7px; }
+.failure-row.clickable { cursor: pointer; }
+.failure-row.clickable:hover { background: #f7fafb; }
+.failure-row.active { background: #f5eee4; }
+.clear-filter { margin-left: auto; border: 0; background: transparent; color: #9a6a52; font-size: 10px; cursor: pointer; }
+.metrics-tasks .panel-head h2 small { color: #9a6a52; font-size: 10px; font-weight: 400; }
 .failure-label strong { display: block; color: #52697c; font-size: 10px; }
 .failure-label small { color: #a1aab2; font-size: 8px; }
 .failure-track { height: 7px; border-radius: 999px; background: #f0f3f5; overflow: hidden; }

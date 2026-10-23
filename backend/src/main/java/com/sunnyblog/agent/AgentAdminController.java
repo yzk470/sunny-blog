@@ -109,8 +109,9 @@ public class AgentAdminController {
 
     @GetMapping("/metrics/tasks")
     public ApiResponse<List<AgentMetricsRepository.TaskRow>> metricsTasks(
-            @RequestParam(defaultValue = "20") int limit) {
-        return ApiResponse.ok(metrics.recentTasks(limit));
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(defaultValue = "") String failureType) {
+        return ApiResponse.ok(metrics.recentTasks(limit, failureType));
     }
 
     @PostMapping("/benchmark/start")
