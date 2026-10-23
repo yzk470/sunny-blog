@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { agentApi, type AgentMetrics, type AgentRun, type AgentRunStep } from '@/api/agent'
 import { useToastStore } from '@/stores/toast'
 
+const route = useRoute()
 const toast = useToastStore()
 const runs = ref<AgentRun[]>([])
 const metrics = ref<AgentMetrics | null>(null)
@@ -25,7 +27,10 @@ async function load() {
     const [list, stats] = await Promise.all([agentApi.runs(), agentApi.metrics()])
     runs.value = list
     metrics.value = stats
-    if (!selected.value && runs.value.length) await open(runs.value[0])
+    const requested = String(route.query.run || '')
+    const target = runs.value.find((run) => run.id === requested)
+    if (!selected.value && target) await open(target)
+    else if (!selected.value && runs.value.length) await open(runs.value[0])
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '加载执行记录失败', 'error')
   } finally {

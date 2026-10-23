@@ -36,7 +36,8 @@ public class AgentOrchestrator {
     }
 
     public Result chat(String sessionId, String clientTaskId, String question, String requestedMode,
-                       List<String> knowledgeBaseIds, String benchmarkVariant, Consumer<AgentEvent> events) {
+                       List<String> knowledgeBaseIds, String benchmarkVariant, String benchmarkFault,
+                       Consumer<AgentEvent> events) {
         if (!llm.isConfigured()) {
             throw new IllegalStateException("Agent 模型未配置，请设置 DEEPSEEK_API_KEY");
         }
@@ -58,6 +59,7 @@ public class AgentOrchestrator {
             if (run.getStatus() == null) run.setStatus("RUNNING");
             run.getCheckpoint().setBenchmarkVariant(
                     benchmarkVariant == null || benchmarkVariant.isBlank() ? "dynamic" : benchmarkVariant);
+            run.getCheckpoint().setBenchmarkFault(benchmarkFault == null ? "" : benchmarkFault);
             runs.checkpoint(run);
 
             if ("DONE".equals(run.getStatus())) {
@@ -115,6 +117,7 @@ public class AgentOrchestrator {
             return executeAttempts(session, run, mode, question, memoryContext, events);
         } finally {
             AgentTaskContext.clear();
+            AgentFaultInjection.clear();
             tools.clearKnowledgeBases();
         }
     }
@@ -130,6 +133,7 @@ public class AgentOrchestrator {
         if (checkpoint.getSearch() == null) checkpoint.setSearch(new AgentRunService.SearchState());
         if (checkpoint.getStrategies() == null) checkpoint.setStrategies(new ArrayList<>());
         if (checkpoint.getAttempts() == null) checkpoint.setAttempts(new ArrayList<>());
+        AgentFaultInjection.start(checkpoint.getBenchmarkFault());
         if (checkpoint.getStrategies().isEmpty()) {
             AgentPreflightService.Preflight check = preflight.check(question);
             runs.addStep(run, "PREFLIGHT", check.summary(), String.join("\n", check.warnings()), check.ok());
@@ -162,7 +166,7 @@ public class AgentOrchestrator {
             }
             checkpoint.setSuccessCriteria(plan.successCriteria());
             checkpoint.setStrategies(plan.strategies());
-            checkpoint.setTaskBudget(decision.taskBudget());
+            checkpoint.setTaskBudget(AgentFaultInjection.budgetOverride(decision.taskBudget()));
             checkpoint.setHighValue(decision.highValue());
             checkpoint.getSearch().setEnabled(decision.highValue());
             checkpoint.getSearch().setMode(decision.highValue() ? "BEST_FIRST" : "LINEAR");
@@ -614,6 +618,9 @@ public class AgentOrchestrator {
                 && checkpoint.getReact().getTools().stream().noneMatch(tool ->
                 tool.isSuccess() && ("run_script".equals(tool.getAction()) || "run_command".equals(tool.getAction())))) {
             return new Verdict(false, "任务要求真实执行，但当前路线没有成功运行脚本或命令", "TOOL");
+        }
+        if (AgentFaultInjection.takeValidatorFailure()) {
+            return new Verdict(false, "模拟验收失败：结果不完整", "LOGIC");
         }
         Validation validation = validate(question, answer,
                 artifacts.manifestRun(run.getId()) + executionEvidenceBlock(attempt),

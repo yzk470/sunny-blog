@@ -41,6 +41,10 @@ public class AgentToolExecutor {
     }
 
     public AgentFileTools.ToolResult execute(String action, JsonNode input) {
+        String injected = AgentFaultInjection.takeToolFailure(action == null ? "" : action);
+        if (injected != null) {
+            return AgentFileTools.ToolResult.fail(injected);
+        }
         try {
             return switch (action == null ? "" : action) {
                 case "list_skills" -> AgentFileTools.ToolResult.ok(skillsService.catalog());

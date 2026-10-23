@@ -24,8 +24,12 @@ public class AgentAdminController {
     private final AgentRunService runs;
     private final AgentArtifactService artifacts;
     private final AgentMetricsService metrics;
+    private final AgentBenchmarkService benchmark;
 
     public record SkillRequest(String slug, String name, String description, String content) {
+    }
+
+    public record BenchmarkRequest(String variants, int repeats, List<String> taskIds) {
     }
 
     @GetMapping("/skills")
@@ -107,6 +111,27 @@ public class AgentAdminController {
     public ApiResponse<List<AgentMetricsRepository.TaskRow>> metricsTasks(
             @RequestParam(defaultValue = "20") int limit) {
         return ApiResponse.ok(metrics.recentTasks(limit));
+    }
+
+    @PostMapping("/benchmark/start")
+    public ApiResponse<AgentBenchmarkService.Status> startBenchmark(@RequestBody BenchmarkRequest request) {
+        try {
+            return ApiResponse.ok(benchmark.start(request.variants(),
+                    request.repeats() <= 0 ? 3 : request.repeats(), request.taskIds()));
+        } catch (Exception ex) {
+            return ApiResponse.fail(500, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/benchmark/status")
+    public ApiResponse<AgentBenchmarkService.Status> benchmarkStatus() {
+        return ApiResponse.ok(benchmark.status());
+    }
+
+    @PostMapping("/benchmark/stop")
+    public ApiResponse<Boolean> stopBenchmark() {
+        benchmark.stop();
+        return ApiResponse.ok(true);
     }
 
     @GetMapping("/artifacts")

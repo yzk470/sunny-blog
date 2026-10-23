@@ -73,6 +73,7 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
         "mode": task["mode"],
         "knowledgeBaseIds": [],
         "benchmarkVariant": variant,
+        "benchmarkFault": task.get("fault", ""),
     }
     started = time.time()
     events: list[dict[str, Any]] = []
@@ -154,10 +155,17 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
         failures.append("execution-not-confirmed")
     if checks.get("maxSeconds") and duration > checks["maxSeconds"]:
         failures.append(f"timeout>{checks['maxSeconds']}s")
+    if checks.get("expectBlocked"):
+        blocked = any(word in answer for word in ("不存在", "无法", "不能", "不支持", "没有", "缺少"))
+        if not blocked and view.get("status") != "FAILED":
+            failures.append("unsat-not-declared")
+        if artifact_paths:
+            failures.append("unsat-produced-artifact")
 
     return {
         "task": task["id"],
         "variant": variant,
+        "fault": task.get("fault", ""),
         "success": not failures,
         "failures": failures,
         "duration": duration,

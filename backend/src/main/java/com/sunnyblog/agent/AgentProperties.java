@@ -22,4 +22,5 @@ public class AgentProperties {
     private int highValueSampleCount = 4;
     private int highValueMaxBranches = 3;
     private int highValueTaskBudget = 80;
+    private String benchmarkDir = "./benchmarks/agent";
 }

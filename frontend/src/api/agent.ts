@@ -133,6 +133,15 @@ export interface AgentMetricTask {
   createdAt: string
 }
 
+export interface AgentBenchmarkStatus {
+  running: boolean
+  exitCode: number
+  startedAt: string
+  finishedAt: string
+  log: string
+  report: string
+}
+
 export interface AgentStreamHandlers {
   onEvent?: (type: string, message: string, detail: string, seq?: number) => void
   onDone?: () => void
@@ -273,6 +282,15 @@ export const agentApi = {
   },
   metricsTasks(limit = 20) {
     return httpGet<AgentMetricTask[]>(`/admin/agent/metrics/tasks?limit=${limit}`)
+  },
+  startBenchmark(payload: { variants: string; repeats: number; taskIds?: string[] }) {
+    return httpPost<AgentBenchmarkStatus>('/admin/agent/benchmark/start', payload)
+  },
+  benchmarkStatus() {
+    return httpGet<AgentBenchmarkStatus>('/admin/agent/benchmark/status')
+  },
+  stopBenchmark() {
+    return httpPost<boolean>('/admin/agent/benchmark/stop', {})
   },
   run(id: string) {
     return httpGet<AgentRun>(`/admin/agent/runs/${encodeURIComponent(id)}`)

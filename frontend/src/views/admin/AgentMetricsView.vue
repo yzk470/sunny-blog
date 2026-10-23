@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   agentApi,
   type AgentFailureRow,
@@ -9,6 +10,7 @@ import {
 } from '@/api/agent'
 import { useToastStore } from '@/stores/toast'
 
+const router = useRouter()
 const toast = useToastStore()
 const days = ref(30)
 const loading = ref(true)
@@ -70,6 +72,10 @@ function failureLabel(value: string) {
 
 function barWidth(value: number, max: number) {
   return `${Math.max(2, Math.round((value / max) * 100))}%`
+}
+
+function openTask(taskId: string) {
+  router.push({ name: 'admin-agent-runs', query: { run: taskId } })
 }
 
 onMounted(load)
@@ -144,7 +150,7 @@ onMounted(load)
             <tr><th>任务</th><th>模式</th><th>状态</th><th>尝试</th><th>成本</th><th>耗时</th><th>时间</th></tr>
           </thead>
           <tbody>
-            <tr v-for="task in tasks" :key="task.runId">
+            <tr v-for="task in tasks" :key="task.runId" class="clickable" @click="openTask(task.runId)">
               <td><code>{{ task.runId.slice(0, 8) }}</code></td>
               <td>{{ task.mode }}<em v-if="task.highValue">高价值</em></td>
               <td><span :class="['status-dot', task.success ? 'ok' : 'bad']">{{ task.status }}</span></td>
@@ -192,6 +198,8 @@ onMounted(load)
 table { width: 100%; border-collapse: collapse; font-size: 10px; }
 th { text-align: left; color: #97a1a9; font-weight: 500; padding: 7px 8px; border-bottom: 1px solid rgba(105, 126, 145, 0.12); }
 td { color: #526879; padding: 8px; border-bottom: 1px solid rgba(105, 126, 145, 0.07); }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: #f7fafb; }
 code { color: #6f8596; font-family: Consolas, monospace; font-size: 9px; }
 td em { margin-left: 5px; padding: 1px 4px; border-radius: 4px; background: #f5eddf; color: #977540; font-style: normal; font-size: 8px; }
 .status-dot { font-size: 9px; }

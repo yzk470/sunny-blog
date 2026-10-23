@@ -163,6 +163,7 @@ public class AgentRunService {
         private SearchState search = new SearchState();
         private boolean highValue;
         private String benchmarkVariant = "dynamic";
+        private String benchmarkFault = "";
         private int taskBudget = 48;
         private int taskSpent;
         private List<Strategy> strategies = new ArrayList<>();

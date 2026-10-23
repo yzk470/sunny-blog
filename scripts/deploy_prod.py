@@ -29,6 +29,8 @@ DIST_ARCHIVE = ROOT / ".tmp" / "deploy-dist.tar.gz"
 JAR = ROOT / "backend" / "target" / "sunny-blog-1.0.0.jar"
 DIST = ROOT / "frontend" / "dist"
 RUNNER = ROOT / "scripts" / "agent-sandbox-runner.sh"
+BENCH = ROOT / "benchmarks" / "agent"
+BENCH_ARCHIVE = ROOT / ".tmp" / "benchmarks-agent.tar.gz"
 
 
 def read_credentials() -> dict[str, str]:
@@ -68,6 +70,10 @@ def build() -> None:
         for path in sorted(DIST.rglob("*")):
             if path.is_file():
                 tar.add(path, arcname=str(path.relative_to(DIST)))
+    with tarfile.open(BENCH_ARCHIVE, "w:gz") as tar:
+        for path in sorted(BENCH.rglob("*")):
+            if path.is_file() and "reports" not in path.parts:
+                tar.add(path, arcname=str(path.relative_to(BENCH.parent)))
     print(f"dist archive: {DIST_ARCHIVE.stat().st_size / 1024 / 1024:.1f} MB")
 
 
@@ -98,6 +104,7 @@ def deploy(client) -> None:
     client.exec_command(f"mkdir -p {REMOTE}/incoming", timeout=30)[1].read()
     upload(client, JAR, f"{REMOTE}/incoming/sunny-blog.jar")
     upload(client, DIST_ARCHIVE, f"{REMOTE}/incoming/deploy-dist.tar.gz")
+    upload(client, BENCH_ARCHIVE, f"{REMOTE}/incoming/benchmarks-agent.tar.gz")
     upload(client, RUNNER, f"{REMOTE}/incoming/sunny-agent-run")
 
     script = f"""
@@ -109,6 +116,9 @@ rm -rf frontend.prev
 mv frontend frontend.prev
 mkdir -p frontend
 tar -xzf incoming/deploy-dist.tar.gz -C frontend
+rm -rf {REMOTE}/benchmarks
+mkdir -p {REMOTE}/benchmarks
+tar -xzf incoming/benchmarks-agent.tar.gz -C {REMOTE}/benchmarks
 mv -f incoming/sunny-blog.jar app/sunny-blog.jar
 chown -R sunnyblog:sunnyblog {REMOTE}
 # Provision the dedicated unprivileged script runner used by systemd-run.
