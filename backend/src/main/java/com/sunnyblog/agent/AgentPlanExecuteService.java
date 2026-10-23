@@ -60,7 +60,7 @@ public class AgentPlanExecuteService {
 
                     请根据验收意见重新检查并修正结果。
                     """.formatted(task, plan.getAnswer(), plan.getValidation()),
-                    memoryContext, run, plan.getCurrent(), events, 6);
+                    memoryContext, run, plan.getCurrent(), events, 8);
             if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
                 plan.setPaused(true);
                 runs.checkpoint(run);
@@ -105,7 +105,7 @@ public class AgentPlanExecuteService {
                     %s
                     """.formatted(task, i + 1, plan.getPlan().size(), step,
                     plan.getResults().isBlank() ? "（无）" : plan.getResults());
-            String answer = react.run(stepTask, memoryContext, run, plan.getCurrent(), events, 6);
+            String answer = react.run(stepTask, memoryContext, run, plan.getCurrent(), events, 8);
             if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
                 plan.setPaused(true);
                 runs.checkpoint(run);
@@ -143,7 +143,7 @@ public class AgentPlanExecuteService {
 
                         请根据验收意见重新检查并修正结果。
                         """.formatted(task, plan.getAnswer(), validation.reason),
-                        memoryContext, run, plan.getCurrent(), events, 6);
+                        memoryContext, run, plan.getCurrent(), events, 8);
                 if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
                     plan.setPaused(true);
                     runs.checkpoint(run);

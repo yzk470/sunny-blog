@@ -119,7 +119,7 @@ public class AgentOrchestrator {
                     runs.checkpoint(run);
                     events.accept(new AgentEvent("status", "识别为短任务，进入 ReAct 循环…", ""));
                     answer = ensureAnswer(react.run(question, memoryContext, run,
-                            checkpoint.getReact(), events, 12), run.getId());
+                            checkpoint.getReact(), events, 16), run.getId());
                     if (isCancelled(run)) return pause(session, run, mode, validation, events);
                     String artifactManifest = artifacts.manifestRun(run.getId());
                     Validation result = validate(question, answer, artifactManifest);
@@ -142,7 +142,7 @@ public class AgentOrchestrator {
 
                                 请不要辩解，直接修正并重新完成任务。
                                 """.formatted(question, answer, result.reason),
-                                memoryContext, run, checkpoint.getReact(), events, 6);
+                                memoryContext, run, checkpoint.getReact(), events, 8);
                         Validation second = validate(question, revised, artifacts.manifestRun(run.getId()));
                         validation = second.reason;
                         runs.addStep(run, "VALIDATION", second.passed ? "复审通过" : "复审未通过",
