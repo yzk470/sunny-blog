@@ -74,6 +74,7 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
         "mode": task["mode"],
         "knowledgeBaseIds": [],
         "benchmarkVariant": variant,
+        "benchmarkGroup": task.get("group", "capability"),
         "benchmarkFault": task.get("fault", ""),
     }
     started = time.time()

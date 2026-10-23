@@ -98,6 +98,14 @@ export interface AgentMetrics {
   highValueTasks: number
   highValueSuccesses: number
   branchesExpanded: number
+  capabilityTasks: number
+  capabilitySuccesses: number
+  capabilitySuccessRate: number
+  securityTasks: number
+  securityPasses: number
+  securityPassRate: number
+  scopeViolations: number
+  productionTasks: number
 }
 
 export interface AgentTrendRow {
@@ -131,6 +139,9 @@ export interface AgentMetricTask {
   success: boolean
   durationMs: number
   createdAt: string
+  testGroup: string
+  benchmarkPass: boolean
+  scopeViolation: boolean
 }
 
 export interface AgentBenchmarkStatus {
@@ -280,9 +291,10 @@ export const agentApi = {
   metricsFailures(days = 30) {
     return httpGet<AgentFailureRow[]>(`/admin/agent/metrics/failures?days=${days}`)
   },
-  metricsTasks(limit = 20, failureType = '') {
+  metricsTasks(limit = 20, failureType = '', group = '') {
     const query = new URLSearchParams({ limit: String(limit) })
     if (failureType) query.set('failureType', failureType)
+    if (group) query.set('group', group)
     return httpGet<AgentMetricTask[]>(`/admin/agent/metrics/tasks?${query.toString()}`)
   },
   startBenchmark(payload: { variants: string; repeats: number; group?: string; taskIds?: string[] }) {

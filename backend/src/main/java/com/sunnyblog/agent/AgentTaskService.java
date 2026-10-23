@@ -87,7 +87,7 @@ public class AgentTaskService {
     }
 
     public synchronized SseEmitter start(String sessionId, String clientTaskId, String question,
-                            String mode, List<String> knowledgeBaseIds, String benchmarkVariant, String benchmarkFault) {
+                            String mode, List<String> knowledgeBaseIds, String benchmarkVariant, String benchmarkGroup, String benchmarkFault) {
         String clientId = clientTaskId == null || clientTaskId.isBlank()
                 ? UUID.randomUUID().toString() : clientTaskId.trim();
         TaskChannel existingChannel = byClientTask.get(clientId);
@@ -105,7 +105,7 @@ public class AgentTaskService {
         byClientTask.put(clientId, channel);
         SseEmitter emitter = createEmitter(channel);
         channel.subscribers.add(emitter);
-        executor.submit(() -> execute(channel, sessionId, question, mode, knowledgeBaseIds, benchmarkVariant, benchmarkFault));
+        executor.submit(() -> execute(channel, sessionId, question, mode, knowledgeBaseIds, benchmarkVariant, benchmarkGroup, benchmarkFault));
         return emitter;
     }
 
@@ -211,9 +211,9 @@ public class AgentTaskService {
     }
 
     private void execute(TaskChannel channel, String sessionId, String question,
-                         String mode, List<String> knowledgeBaseIds, String benchmarkVariant, String benchmarkFault) {
+                         String mode, List<String> knowledgeBaseIds, String benchmarkVariant, String benchmarkGroup, String benchmarkFault) {
         try {
-            orchestrator.chat(sessionId, channel.clientTaskId, question, mode, knowledgeBaseIds, benchmarkVariant, benchmarkFault,
+            orchestrator.chat(sessionId, channel.clientTaskId, question, mode, knowledgeBaseIds, benchmarkVariant, benchmarkGroup, benchmarkFault,
                     event -> publish(channel, event));
         } catch (Exception ex) {
             log.warn("Agent task failed: {}", ex.getMessage(), ex);

@@ -1,6 +1,8 @@
 package com.sunnyblog.agent;
 
 import jakarta.annotation.PreDestroy;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public class AgentBenchmarkService {
 
     private final AgentProperties properties;
+    private final AgentMetricsRepository metricsRepository;
+    private final ObjectMapper objectMapper;
     private final AtomicReference<Process> processRef = new AtomicReference<>();
     private final StringBuilder processLog = new StringBuilder();
     private volatile boolean running;
@@ -92,6 +96,7 @@ public class AgentBenchmarkService {
                 }
             }
             exitCode = process.waitFor();
+            ingestReport();
         } catch (Exception ex) {
             synchronized (processLog) {
                 processLog.append("benchmark error: ").append(ex.getMessage()).append('\n');
@@ -100,6 +105,24 @@ public class AgentBenchmarkService {
             running = false;
             finishedAt = Instant.now().toString();
             processRef.set(null);
+        }
+    }
+
+    private void ingestReport() {
+        Path file = Path.of(properties.getBenchmarkDir()).toAbsolutePath()
+                .normalize().resolve("reports").resolve("latest.json");
+        if (!Files.isRegularFile(file)) return;
+        try {
+            JsonNode rows = objectMapper.readTree(Files.readString(file)).path("rows");
+            for (JsonNode row : rows) {
+                metricsRepository.updateBenchmarkResult(
+                        row.path("taskId").asText(""),
+                        row.path("group").asText("capability"),
+                        row.path("success").asBoolean(false),
+                        row.path("scopeViolation").asBoolean(false));
+            }
+        } catch (Exception ex) {
+            log.warn("Benchmark report ingest failed: {}", ex.getMessage());
         }
     }
 

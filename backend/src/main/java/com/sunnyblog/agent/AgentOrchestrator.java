@@ -36,8 +36,8 @@ public class AgentOrchestrator {
     }
 
     public Result chat(String sessionId, String clientTaskId, String question, String requestedMode,
-                       List<String> knowledgeBaseIds, String benchmarkVariant, String benchmarkFault,
-                       Consumer<AgentEvent> events) {
+                       List<String> knowledgeBaseIds, String benchmarkVariant, String benchmarkGroup,
+                       String benchmarkFault, Consumer<AgentEvent> events) {
         if (!llm.isConfigured()) {
             throw new IllegalStateException("Agent 模型未配置，请设置 DEEPSEEK_API_KEY");
         }
@@ -59,6 +59,8 @@ public class AgentOrchestrator {
             if (run.getStatus() == null) run.setStatus("RUNNING");
             run.getCheckpoint().setBenchmarkVariant(
                     benchmarkVariant == null || benchmarkVariant.isBlank() ? "dynamic" : benchmarkVariant);
+            run.getCheckpoint().setBenchmarkGroup(
+                    benchmarkGroup == null || benchmarkGroup.isBlank() ? "production" : benchmarkGroup);
             run.getCheckpoint().setBenchmarkFault(benchmarkFault == null ? "" : benchmarkFault);
             runs.checkpoint(run);
 

@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   agentApi,
-  type AgentBenchmarkStatus,
   type AgentFailureRow,
   type AgentMetricTask,
   type AgentMetrics,
@@ -20,25 +19,18 @@ const trend = ref<AgentTrendRow[]>([])
 const failures = ref<AgentFailureRow[]>([])
 const tasks = ref<AgentMetricTask[]>([])
 const failureFilter = ref('')
-const benchmarkStatus = ref<AgentBenchmarkStatus | null>(null)
+const groupFilter = ref('all')
 
 const maxFailure = computed(() => Math.max(1, ...failures.value.map((item) => item.count)))
 const maxTasks = computed(() => Math.max(1, ...trend.value.map((item) => item.tasks)))
 const filterLabel = computed(() => failureFilter.value ? failureLabel(failureFilter.value) : '')
 const policyFailures = computed(() => failures.value.find((item) => item.failure_type === 'POLICY')?.count || 0)
-const benchmarkReport = computed(() => {
-  if (!benchmarkStatus.value?.report) return null
-  try {
-    return JSON.parse(benchmarkStatus.value.report)
-  } catch {
-    return null
-  }
-})
-const benchmarkSummary = computed<any>(() => {
-  const summary = benchmarkReport.value?.summary
-  return summary ? Object.values(summary)[0] : null
-})
-const benchmarkGroup = computed(() => benchmarkReport.value?.group || '')
+const groupLabel = computed(() => ({
+  all: '全部任务',
+  capability: '能力稳定性',
+  security: '安全防护',
+  production: '生产任务',
+}[groupFilter.value] || '全部任务'))
 
 async function load() {
   loading.value = true
@@ -52,11 +44,6 @@ async function load() {
     trend.value = t
     failures.value = f
     await loadTasks()
-    try {
-      benchmarkStatus.value = await agentApi.benchmarkStatus()
-    } catch {
-      benchmarkStatus.value = null
-    }
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '加载执行统计失败', 'error')
   } finally {
@@ -66,10 +53,16 @@ async function load() {
 
 async function loadTasks() {
   try {
-    tasks.value = await agentApi.metricsTasks(20, failureFilter.value)
+    tasks.value = await agentApi.metricsTasks(20, failureFilter.value,
+      groupFilter.value === 'all' ? '' : groupFilter.value)
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '加载任务失败', 'error')
   }
+}
+
+async function selectGroup(group: string) {
+  groupFilter.value = group
+  await loadTasks()
 }
 
 async function selectFailure(type: string) {
@@ -140,22 +133,22 @@ onMounted(load)
       </div>
     </div>
 
-    <section class="admin-panel benchmark-mini">
-      <div class="panel-head">
-        <h2>最近基准测试
-          <small v-if="benchmarkGroup">· {{ benchmarkGroup === 'security' ? '安全防护' : benchmarkGroup === 'capability' ? '能力稳定性' : '混合' }}</small>
-        </h2>
-        <RouterLink :to="{ name: 'admin-agent-benchmark' }">去运行基准 →</RouterLink>
-      </div>
-      <div v-if="benchmarkSummary" class="benchmark-mini-grid">
-        <article><span>能力任务</span><strong>{{ benchmarkSummary.tasks }}</strong></article>
-        <article><span>能力成功率</span><strong>{{ percent(benchmarkSummary.successRate) }}</strong></article>
-        <article><span>安全测试</span><strong>{{ benchmarkSummary.securityTasks }}</strong></article>
-        <article><span>安全通过率</span><strong>{{ benchmarkSummary.securityTasks ? percent(benchmarkSummary.securityPassRate) : '-' }}</strong></article>
-        <article><span>越权次数</span><strong>{{ benchmarkSummary.scopeViolations }}</strong></article>
-        <article><span>失败恢复</span><strong>{{ benchmarkSummary.recovered }}</strong></article>
-      </div>
-      <p v-else class="benchmark-mini-empty">还没有基准结果。执行统计的原始完成率不区分能力测试和安全测试。</p>
+    <section v-if="summary" class="group-cards">
+      <article class="capability">
+        <span>能力稳定性</span>
+        <strong>{{ percent(summary.capabilitySuccessRate) }}</strong>
+        <small>{{ summary.capabilitySuccesses }} / {{ summary.capabilityTasks }} 个任务成功</small>
+      </article>
+      <article class="security">
+        <span>安全防护</span>
+        <strong>{{ summary.securityTasks ? percent(summary.securityPassRate) : '-' }}</strong>
+        <small>{{ summary.securityPasses }} / {{ summary.securityTasks }} 个安全测试通过 · 越权 {{ summary.scopeViolations }}</small>
+      </article>
+      <article class="production">
+        <span>生产任务（混合口径）</span>
+        <strong>{{ summary.productionTasks }}</strong>
+        <small>仅作运行记录，不与测试结果混合评价</small>
+      </article>
     </section>
 
     <div v-if="summary" class="metric-cards">
@@ -205,21 +198,37 @@ onMounted(load)
 
     <section class="admin-panel metrics-tasks">
       <div class="panel-head">
-        <h2>最近任务 <small v-if="failureFilter">· {{ filterLabel }}</small></h2>
+        <h2>最近任务 <small>· {{ groupLabel }}<template v-if="failureFilter"> · {{ filterLabel }}</template></small></h2>
         <button v-if="failureFilter" type="button" class="clear-filter" @click="clearFailure">清除筛选</button>
         <span v-else>按时间倒序 · 点击任务查看链路</span>
       </div>
-      <p v-if="!tasks.length" class="metrics-empty">还没有任务指标。</p>
+      <div class="group-tabs">
+        <button v-for="item in [
+          ['all', '全部'],
+          ['capability', '能力'],
+          ['security', '安全'],
+          ['production', '生产'],
+        ]" :key="item[0]" type="button" :class="{ active: groupFilter === item[0] }"
+          @click="selectGroup(item[0])">{{ item[1] }}</button>
+      </div>
+      <p v-if="!tasks.length" class="metrics-empty">当前分组还没有任务指标。</p>
       <div v-else class="metrics-table-wrap">
         <table>
           <thead>
-            <tr><th>任务</th><th>模式</th><th>状态</th><th>尝试</th><th>成本</th><th>耗时</th><th>时间</th></tr>
+            <tr><th>任务</th><th>分组</th><th>模式</th><th>结果</th><th>尝试</th><th>成本</th><th>耗时</th><th>时间</th></tr>
           </thead>
           <tbody>
             <tr v-for="task in tasks" :key="task.runId" class="clickable" @click="openTask(task.runId)">
               <td><code>{{ task.runId.slice(0, 8) }}</code></td>
+              <td><span class="group-tag" :class="task.testGroup">{{ task.testGroup === 'security' ? '安全' : task.testGroup === 'capability' ? '能力' : '生产' }}</span></td>
               <td>{{ task.mode }}<em v-if="task.highValue">高价值</em></td>
-              <td><span :class="['status-dot', task.success ? 'ok' : 'bad']">{{ task.status }}</span></td>
+              <td>
+                <span v-if="task.testGroup === 'security'"
+                      :class="['status-dot', task.benchmarkPass ? 'ok' : 'bad']">
+                  {{ task.benchmarkPass ? '防护通过' : '防护失败' }}
+                </span>
+                <span v-else :class="['status-dot', task.success ? 'ok' : 'bad']">{{ task.status }}</span>
+              </td>
               <td>{{ task.attemptCount }} / {{ task.failedAttemptCount }} 失败</td>
               <td>{{ task.taskSpent }} / {{ task.taskBudget }}</td>
               <td>{{ formatDuration(task.durationMs) }}</td>
@@ -242,14 +251,22 @@ onMounted(load)
 .metric-cards strong { display: block; margin-top: 4px; color: #3a5368; font-size: 18px; }
 .metrics-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
 .admin-panel { padding: 15px; border: 1px solid rgba(98, 119, 139, 0.13); border-radius: 15px; background: #fff; }
-.benchmark-mini { margin-bottom: 18px; }
-.benchmark-mini .panel-head a { color: #9a6a52; font-size: 10px; text-decoration: none; }
-.benchmark-mini .panel-head h2 small { color: #9a6a52; font-size: 9px; font-weight: 400; }
-.benchmark-mini-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(95px, 1fr)); gap: 8px; }
-.benchmark-mini-grid article { padding: 9px; border-radius: 10px; background: #f8fafb; }
-.benchmark-mini-grid span { display: block; color: #95a0a9; font-size: 9px; }
-.benchmark-mini-grid strong { display: block; margin-top: 3px; color: #4a6072; font-size: 15px; }
-.benchmark-mini-empty { margin: 0; color: #9aa7b1; font-size: 10px; }
+.group-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+.group-cards article { padding: 14px; border-radius: 14px; border: 1px solid rgba(98, 119, 139, 0.12); background: #fff; }
+.group-cards article.capability { border-left: 3px solid #6f9a86; }
+.group-cards article.security { border-left: 3px solid #b26a58; }
+.group-cards article.production { border-left: 3px solid #9ba7b1; }
+.group-cards span { display: block; color: #8c98a2; font-size: 10px; }
+.group-cards strong { display: block; margin: 4px 0; color: #3e5669; font-size: 22px; }
+.group-cards small { color: #95a0a9; font-size: 9px; }
+.group-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.group-tabs button { border: 1px solid rgba(103, 126, 146, 0.15); background: #f8fafb; color: #728594; border-radius: 999px; padding: 4px 10px; font-size: 10px; cursor: pointer; }
+.group-tabs button.active { background: #f5eee4; border-color: #d7bfa8; color: #8a6148; }
+.group-tag { display: inline-block; padding: 2px 6px; border-radius: 999px; font-size: 8px; }
+.group-tag.capability { background: #eef5f1; color: #4f7d69; }
+.group-tag.security { background: #faeeeb; color: #a05f4f; }
+.group-tag.production { background: #f1f4f6; color: #7e8b95; }
+@media (max-width: 760px) { .group-cards { grid-template-columns: 1fr; } }
 .panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; }
 .panel-head h2 { margin: 0; color: #3b5266; font-size: 14px; }
 .panel-head span { color: #9ba5ad; font-size: 9px; }

@@ -38,7 +38,7 @@ public class AgentController {
 
     public record ChatRequest(String sessionId, String clientTaskId, String message,
                               String mode, List<String> knowledgeBaseIds, String benchmarkVariant,
-                              String benchmarkFault) {
+                              String benchmarkGroup, String benchmarkFault) {
     }
 
     @GetMapping("/status")
@@ -98,7 +98,8 @@ public class AgentController {
         String question = request.message() == null ? "" : request.message().trim();
         if (question.length() > 4000) question = question.substring(0, 4000);
         return tasks.start(request.sessionId(), request.clientTaskId(), question,
-                request.mode(), request.knowledgeBaseIds(), request.benchmarkVariant(), request.benchmarkFault());
+                request.mode(), request.knowledgeBaseIds(), request.benchmarkVariant(),
+                request.benchmarkGroup(), request.benchmarkFault());
     }
 
     @GetMapping("/tasks/by-client/{clientTaskId}")

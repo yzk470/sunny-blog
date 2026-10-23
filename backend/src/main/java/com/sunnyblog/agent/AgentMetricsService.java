@@ -34,7 +34,10 @@ public class AgentMetricsService {
                            long attempts, long failedAttempts, double retryRate,
                            long steps, double averageSteps,
                            long highValueTasks, long highValueSuccesses,
-                           long branchesExpanded) {
+                           long branchesExpanded,
+                           long capabilityTasks, long capabilitySuccesses, double capabilitySuccessRate,
+                           long securityTasks, long securityPasses, double securityPassRate,
+                           long scopeViolations, long productionTasks) {
     }
 
     public void record(AgentRunService.AgentRun run) {
@@ -73,7 +76,9 @@ public class AgentMetricsService {
             return new Snapshot(db.tasks(), db.successes(), db.failures(), db.successRate(),
                     db.attempts(), db.failedAttempts(), db.retryRate(), db.steps(),
                     db.averageSteps(), db.highValueTasks(), db.highValueSuccesses(),
-                    db.branchesExpanded());
+                    db.branchesExpanded(), db.capabilityTasks(), db.capabilitySuccesses(),
+                    db.capabilitySuccessRate(), db.securityTasks(), db.securityPasses(),
+                    db.securityPassRate(), db.scopeViolations(), db.productionTasks());
         }
         long t = tasks.get();
         long a = attempts.get();
@@ -81,7 +86,8 @@ public class AgentMetricsService {
                 t == 0 ? 0 : (double) successes.get() / t,
                 a, failedAttempts.get(), a == 0 ? 0 : (double) failedAttempts.get() / a,
                 steps.get(), t == 0 ? 0 : (double) steps.get() / t,
-                highValueTasks.get(), highValueSuccesses.get(), branches.get());
+                highValueTasks.get(), highValueSuccesses.get(), branches.get(),
+                0, 0, 0, 0, 0, 0, 0, t);
     }
 
     public List<AgentMetricsRepository.DailyRow> trend(int days) {
@@ -96,7 +102,7 @@ public class AgentMetricsService {
         return repository.recentTasks(limit);
     }
 
-    public List<AgentMetricsRepository.TaskRow> recentTasks(int limit, String failureType) {
-        return repository.recentTasks(limit, failureType);
+    public List<AgentMetricsRepository.TaskRow> recentTasks(int limit, String failureType, String testGroup) {
+        return repository.recentTasks(limit, failureType, testGroup);
     }
 }
