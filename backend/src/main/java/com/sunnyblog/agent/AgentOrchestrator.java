@@ -222,6 +222,7 @@ public class AgentOrchestrator {
             attempt.setArtifacts(artifactPaths(run, attempt));
             attempt.setSuccessfulTools(countTools(checkpoint, true));
             attempt.setFailedTools(countTools(checkpoint, false));
+            attempt.setExecutionEvidence(executionEvidence(checkpoint));
             runs.checkpoint(run);
 
             Verdict verdict = verifyAttempt(question, run, checkpoint, attempt, answer);
@@ -287,6 +288,7 @@ public class AgentOrchestrator {
         attempt.setArtifacts(artifactPaths(run, attempt));
         attempt.setSuccessfulTools(countTools(checkpoint, true));
         attempt.setFailedTools(countTools(checkpoint, false));
+        attempt.setExecutionEvidence(executionEvidence(checkpoint));
         String reflection = failures.reflect(run.getQuestion(), attempt, failureType, reason);
         attempt.setReflection(reflection);
         strategy.setStatus("FAILED");
@@ -392,7 +394,7 @@ public class AgentOrchestrator {
     }
 
     private List<String> artifactPaths(AgentRunService.AgentRun run, AgentRunService.AttemptRecord attempt) {
-        String prefix = "attempts/" + attempt.getId() + "/";
+        String prefix = run.getId() + "/attempts/" + attempt.getId() + "/";
         return artifacts.listRun(run.getId()).stream()
                 .map(AgentArtifactService.Artifact::path)
                 .filter(path -> path.startsWith(prefix))
@@ -430,10 +432,33 @@ public class AgentOrchestrator {
                 tool.isSuccess() && ("run_script".equals(tool.getAction()) || "run_command".equals(tool.getAction())))) {
             return new Verdict(false, "任务要求真实执行，但当前路线没有成功运行脚本或命令", "TOOL");
         }
-        Validation validation = validate(question, answer, artifacts.manifestRun(run.getId()),
+        Validation validation = validate(question, answer,
+                artifacts.manifestRun(run.getId()) + executionEvidenceBlock(attempt),
                 checkpoint.getSuccessCriteria());
         return new Verdict(validation.passed(), validation.reason(),
                 validation.passed() ? "" : "LOGIC");
+    }
+
+    private String executionEvidence(AgentRunService.Checkpoint checkpoint) {
+        if (checkpoint.getReact() == null || checkpoint.getReact().getTools() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (AgentRunService.ToolRecord tool : checkpoint.getReact().getTools()) {
+            if (tool.isSuccess() && ("run_script".equals(tool.getAction()) || "run_command".equals(tool.getAction()))) {
+                sb.append("- ").append(tool.getAction()).append("：").append(clip(tool.getOutput(), 1500)).append("\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    private String executionEvidenceBlock(AgentRunService.AttemptRecord attempt) {
+        if (attempt.getExecutionEvidence() == null || attempt.getExecutionEvidence().isBlank()) return "";
+        return "\n\n执行证据（脚本在 workspace，不属于 artifacts；成功执行输出的真实结果）：\n"
+                + attempt.getExecutionEvidence();
+    }
+
+    private String clip(String value, int max) {
+        if (value == null) return "";
+        return value.length() <= max ? value : value.substring(0, max) + "\n...[已截断]";
     }
 
     private String strategyText(List<AgentRunService.Strategy> strategies) {
@@ -475,6 +500,9 @@ public class AgentOrchestrator {
                 判断结果是否真正完成任务；如果只是声称做了、空泛、遗漏关键产物、或答非所问，就不通过。
                 如果任务要求生成文件（pptx/docx/xlsx/pdf/html/图片等），产物清单中必须有对应文件；
                 只有文字说明而没有产物时，不能通过。
+                如果任务只是要求写脚本并运行，执行证据中有成功的 run_script/run_command 和真实输出，
+                且候选结果给出脚本路径与结果，即使脚本在 workspace 而不在 artifacts，也可以通过；
+                只有用户明确要求交付脚本文件时才要求 artifacts 中有脚本。
                 只输出 JSON：{"passed":true/false,"reason":"一句中文理由"}。
                 """;
         String user = "用户任务：\n" + task + "\n\n成功标准：\n"

@@ -113,6 +113,7 @@ public class AgentRunService {
         private int budgetSpent;
         private int successfulTools;
         private int failedTools;
+        private String executionEvidence = "";
         private String startedAt;
         private String endedAt;
         private List<String> artifacts = new ArrayList<>();
