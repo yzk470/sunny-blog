@@ -57,10 +57,14 @@ public class AgentFileTools {
         if (runId == null || runId.isBlank()) return base;
         Path runRoot = base.resolve(runId).normalize();
         if (!runRoot.startsWith(base)) throw new IllegalStateException("非法任务产物路径");
+        String attemptId = AgentTaskContext.attemptId();
+        Path target = attemptId == null || attemptId.isBlank()
+                ? runRoot : runRoot.resolve("attempts").resolve(attemptId).normalize();
+        if (!target.startsWith(runRoot)) throw new IllegalStateException("非法尝试产物路径");
         try {
-            Files.createDirectories(runRoot);
+            Files.createDirectories(target);
             try {
-                Files.setPosixFilePermissions(runRoot,
+                Files.setPosixFilePermissions(target,
                         java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxr-x"));
             } catch (UnsupportedOperationException ignored) {
                 // Windows development environment.
@@ -68,7 +72,7 @@ public class AgentFileTools {
         } catch (IOException ex) {
             throw new IllegalStateException("无法创建任务产物目录", ex);
         }
-        return runRoot;
+        return target;
     }
 
     private Path root(String name) {

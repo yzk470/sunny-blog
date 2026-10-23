@@ -101,6 +101,11 @@ public class AgentArtifactService {
 
     public String manifestRun(String runId) {
         List<Artifact> artifacts = listRun(runId);
+        String attemptId = AgentTaskContext.attemptId();
+        if (attemptId != null && !attemptId.isBlank() && AgentTaskContext.runId() != null
+                && AgentTaskContext.runId().equals(runId)) {
+            artifacts = listAttempt(runId, attemptId);
+        }
         if (artifacts.isEmpty()) return "本轮没有新增产物文件。";
         StringBuilder sb = new StringBuilder("本轮任务产物：\n");
         for (Artifact artifact : artifacts) {
@@ -113,13 +118,31 @@ public class AgentArtifactService {
         return sb.toString();
     }
 
+    /** Artifacts from exactly one strategy attempt. */
+    public List<Artifact> listAttempt(String runId, String attemptId) {
+        if (runId == null || attemptId == null) return List.of();
+        Path runRoot = root().resolve(runId).normalize();
+        Path attemptRoot = runRoot.resolve("attempts").resolve(attemptId).normalize();
+        if (!attemptRoot.startsWith(root()) || !Files.isDirectory(attemptRoot)) return List.of();
+        return listFrom(attemptRoot);
+    }
+
     public String inspectForRun(String runId, String relative) {
+        return inspectForRun(runId, null, relative);
+    }
+
+    public String inspectForRun(String runId, String attemptId, String relative) {
         if (runId == null || runId.isBlank()) return inspect(relative);
         if (relative != null && relative.startsWith("artifacts/")) relative = relative.substring("artifacts/".length());
         Path runRoot = root().resolve(runId).normalize();
         if (!runRoot.startsWith(root())) return "非法任务产物路径";
-        Path path = runRoot.resolve(relative == null ? "" : relative).normalize();
-        if (!path.startsWith(runRoot)) return "非法任务产物路径";
+        Path base = runRoot;
+        if (attemptId != null && !attemptId.isBlank()) {
+            base = runRoot.resolve("attempts").resolve(attemptId).normalize();
+            if (!base.startsWith(runRoot)) return "非法尝试产物路径";
+        }
+        Path path = base.resolve(relative == null ? "" : relative).normalize();
+        if (!path.startsWith(base)) return "非法任务产物路径";
         if (!Files.isRegularFile(path)) return "产物不存在: " + relative;
         try {
             String globalRelative = root().relativize(path).toString().replace('\\', '/');

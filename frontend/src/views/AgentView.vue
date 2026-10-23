@@ -246,6 +246,12 @@ function streamHandlers(assistant: ChatMessage, task: ActiveTask) {
 
 function applyEvent(assistant: ChatMessage, type: string, message: string, detail: string) {
   if (type === 'status') activity('status', message || '处理中…')
+  else if (type === 'preflight') activity('status', message, detail)
+  else if (type === 'strategy') activity('plan', message, detail)
+  else if (type === 'attempt_start') activity('plan', message, detail)
+  else if (type === 'attempt_failed') activity('validation', message, detail, false)
+  else if (type === 'attempt_success') activity('validation', message, detail, true)
+  else if (type === 'reflection') activity('thought', message, detail)
   else if (type === 'thought') activity('thought', message)
   else if (type === 'plan') activity('plan', message, detail)
   else if (type === 'plan_step') activity('plan', message, detail)

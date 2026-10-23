@@ -6,7 +6,7 @@ package com.sunnyblog.agent;
  */
 public final class AgentTaskContext {
 
-    public record Task(String sessionId, String runId) {
+    public record Task(String sessionId, String runId, String attemptId) {
     }
 
     private static final ThreadLocal<Task> CURRENT = new ThreadLocal<>();
@@ -15,7 +15,11 @@ public final class AgentTaskContext {
     }
 
     public static void set(String sessionId, String runId) {
-        CURRENT.set(new Task(sessionId, runId));
+        set(sessionId, runId, null);
+    }
+
+    public static void set(String sessionId, String runId, String attemptId) {
+        CURRENT.set(new Task(sessionId, runId, attemptId));
     }
 
     public static Task current() {
@@ -25,6 +29,11 @@ public final class AgentTaskContext {
     public static String runId() {
         Task task = CURRENT.get();
         return task == null ? null : task.runId();
+    }
+
+    public static String attemptId() {
+        Task task = CURRENT.get();
+        return task == null ? null : task.attemptId();
     }
 
     public static String sessionId() {

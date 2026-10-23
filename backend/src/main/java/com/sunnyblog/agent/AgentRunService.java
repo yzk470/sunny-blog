@@ -89,10 +89,48 @@ public class AgentRunService {
     }
 
     @Data
+    public static class Strategy {
+        private String id;
+        private String title;
+        private String approach;
+        private String risk;
+        private String fallback;
+        private String status = "PENDING";
+    }
+
+    @Data
+    public static class AttemptRecord {
+        private String id;
+        private String strategyId;
+        private String strategyTitle;
+        private String approach;
+        private String status = "RUNNING";
+        private String failureType;
+        private String failureReason;
+        private String reflection;
+        private String answer;
+        private int budgetAllocated;
+        private int budgetSpent;
+        private int successfulTools;
+        private int failedTools;
+        private String startedAt;
+        private String endedAt;
+        private List<String> artifacts = new ArrayList<>();
+    }
+
+    @Data
     public static class Checkpoint {
         private String phase = "react";
         private ReActState react = new ReActState();
         private PlanState plan = new PlanState();
+        private int taskBudget = 48;
+        private int taskSpent;
+        private List<Strategy> strategies = new ArrayList<>();
+        private int strategyIndex;
+        private List<AttemptRecord> attempts = new ArrayList<>();
+        private String successCriteria = "";
+        private String bestAnswer;
+        private String bestAttemptId;
     }
 
     @Data

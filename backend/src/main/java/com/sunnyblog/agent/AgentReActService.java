@@ -98,7 +98,7 @@ public class AgentReActService {
                             : "请控制步数，不要重复探索；完成目标后尽早 final。",
                     executionSucceeded
                             ? "## 已真实执行成功\n真实输出：\n" + clip(lastExecutionOutput, 1500)
-                            + "\n下一步必须 final；最多允许一次只读检查，禁止再次 write_file/run_script/run_command。"
+                            + "\n如果当前路线已经满足任务成功标准，立即 final；否则只做必要的只读验证，不要重复已经成功的写文件/运行动作。"
                             : "");
 
             AgentEvent status = new AgentEvent("status",
@@ -197,14 +197,10 @@ public class AgentReActService {
                 break;
             }
             if (executionSucceeded && isSideEffectTool(action)) {
-                String summary = executionSummary(lastExecutionOutput);
-                state.setLastAnswer(summary);
-                state.setStep(step);
-                state.setObservations(observations.toString());
-                state.setLastExecutionOutput(lastExecutionOutput);
-                runs.checkpoint(run);
-                record(run, "FINAL", "执行成功后禁止再次写文件/运行，系统收尾", summary, true);
-                return summary;
+                // A successful tool is not task success. Let the attempt continue
+                // with read-only checks or a deliberate retry; the outer attempt
+                // loop will decide whether to switch strategies.
+                observations.append("\n## 提示\n已有成功执行输出，避免重复相同动作；满足成功标准后 final。\n");
             }
             if ("write_file".equals(action)) {
                 String target = input.path("path").asText("");
@@ -377,7 +373,7 @@ public class AgentReActService {
                 剩余 2 步时停止探索、只做必要收尾；剩余 1 步时必须直接 final 总结，不允许再调用工具。
                 如果任务要求运行脚本或命令，必须实际调用 run_script / run_command 并读取真实输出，不能用文字声称结果。
                 如果工具返回 ERROR，必须分析错误、修改代码或路径后重试；但要注意剩余步数。
-                执行成功后下一步必须 final；系统会禁止再次 write_file/run_script/run_command，只允许必要的只读检查。
+                执行成功后不要重复同样的写文件/运行动作；确认任务成功标准已满足后立即 final。
                 同一个文件最多写 3 次；不要为了“再检查一遍”反复重写脚本。
                 严格规则：不要直接使用 run_command 执行 shell 逻辑。请把逻辑写成 scripts/ 下的 .py 或 .js 脚本，再用 run_script 执行。
                 禁止在 run_command 中使用管道 |、重定向 >、&、;、内联代码 -c/-e 或命令串联；run_command 只用于简单只读检查。

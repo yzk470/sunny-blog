@@ -23,6 +23,9 @@ public class AgentOrchestrator {
     private final AgentPlanExecuteService planExecute;
     private final AgentArtifactService artifacts;
     private final AgentToolExecutor tools;
+    private final AgentStrategyService strategies;
+    private final AgentPreflightService preflight;
+    private final AgentFailureService failures;
     private final Map<String, ReentrantLock> sessionLocks = new ConcurrentHashMap<>();
 
     public record Result(String sessionId, String runId, String mode, String answer, String validation) {
@@ -96,100 +99,359 @@ public class AgentOrchestrator {
         AgentTaskControl.clear(run.getId());
         AgentTaskContext.set(session.getId(), run.getId());
         tools.setKnowledgeBases(run.getKnowledgeBaseIds());
-        try {            events.accept(new AgentEvent("session", session.getId(), run.getId()));
+        try {
+            events.accept(new AgentEvent("session", session.getId(), run.getId()));
             events.accept(new AgentEvent("status", resumed ? "从断点继续执行…" : "正在读取记忆与技能…", ""));
             String memoryContext = memory.buildPromptContext(session.getId(), 7000);
             if (!resumed) {
                 memory.append(session.getId(), "user", question, memory.classify(question), "question");
             }
-
-            String answer;
-            String validation = "";
-            try {
-                AgentRunService.Checkpoint checkpoint = run.getCheckpoint();
-                if ("plan".equals(mode)) {
-                    checkpoint.setPhase("plan");
-                    runs.checkpoint(run);
-                    events.accept(new AgentEvent("status", "识别为长任务，进入 plan-and-execute…", ""));
-                    answer = ensureAnswer(planExecute.run(question, memoryContext, run, events), run.getId());
-                    validation = "独立验收已包含在计划执行流程中";
-                    if (isCancelled(run)) return pause(session, run, mode, validation, events);
-                } else {
-                    checkpoint.setPhase("react");
-                    runs.checkpoint(run);
-                    events.accept(new AgentEvent("status", "识别为短任务，进入 ReAct 循环…", ""));
-                    answer = ensureAnswer(react.run(question, memoryContext, run,
-                            checkpoint.getReact(), events, 16), run.getId());
-                    if (isCancelled(run)) return pause(session, run, mode, validation, events);
-                    String artifactManifest = artifacts.manifestRun(run.getId());
-                    Validation result = validate(question, answer, artifactManifest);
-                    validation = result.reason;
-                    runs.addStep(run, "VALIDATION", result.passed ? "独立验收通过" : "独立验收未通过",
-                            result.reason, result.passed);
-                    events.accept(new AgentEvent("validation",
-                            result.passed ? "独立验收通过" : "独立验收要求修改", result.reason));
-                    if (!result.passed) {
-                        checkpoint.setReact(new AgentRunService.ReActState());
-                        runs.checkpoint(run);
-                        String revised = react.run("""
-                                用户任务：%s
-
-                                你上一版回答：
-                                %s
-
-                                独立验收意见：
-                                %s
-
-                                请不要辩解，直接修正并重新完成任务。
-                                """.formatted(question, answer, result.reason),
-                                memoryContext, run, checkpoint.getReact(), events, 8);
-                        Validation second = validate(question, revised, artifacts.manifestRun(run.getId()));
-                        validation = second.reason;
-                        runs.addStep(run, "VALIDATION", second.passed ? "复审通过" : "复审未通过",
-                                second.reason, second.passed);
-                        events.accept(new AgentEvent("validation",
-                                second.passed ? "复审通过" : "复审仍有问题", second.reason));
-                        answer = revised;
-                    }
-                }
-                if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
-                    String cancelled = "任务已按请求停止，可以稍后从 checkpoint 继续。";
-                    runs.finish(run, cancelled, "PAUSED", validation);
-                    events.accept(new AgentEvent("answer", cancelled, "已暂停，可恢复"));
-                    events.accept(new AgentEvent("done", "已暂停", run.getId()));
-                    return new Result(session.getId(), run.getId(), mode, cancelled, validation);
-                }
-            } catch (Exception ex) {
-                log.warn("Agent execution failed: {}", ex.getMessage(), ex);
-                runs.addStep(run, "ERROR", "执行失败", ex.getMessage(), false);
-                String failed = "抱歉，任务执行失败：" + ex.getMessage()
-                        + "\n\n可以从 checkpoint 尝试恢复，或把任务拆小一点。";
-                memory.append(session.getId(), "assistant", failed, "MEDIUM", "error");
-                runs.appendEvent(run, "error", "执行失败", ex.getMessage());
-                runs.finish(run, failed, "FAILED", validation);
-                events.accept(new AgentEvent("error", "执行失败", ex.getMessage()));
-                return new Result(session.getId(), run.getId(), mode, failed, validation);
-            }
-
-            String finalAnswer = answer == null || answer.isBlank() ? "任务已结束，但没有生成有效回答。" : answer;
-            List<AgentArtifactService.Artifact> produced = artifacts.listRun(run.getId());
-            events.accept(new AgentEvent("artifacts",
-                    produced.isEmpty() ? "本轮没有生成文件产物" : "生成了 " + produced.size() + " 个文件",
-                    artifacts.json(produced)));
-            memory.append(session.getId(), "assistant", finalAnswer, "MEDIUM", "answer");
-            runs.finish(run, finalAnswer, "DONE", validation);
-            events.accept(new AgentEvent("answer", finalAnswer, validation));
-            events.accept(new AgentEvent("done", "完成", run.getId()));
-            return new Result(session.getId(), run.getId(), mode, finalAnswer, validation);
+            return executeAttempts(session, run, mode, question, memoryContext, events);
         } finally {
             AgentTaskContext.clear();
             tools.clearKnowledgeBases();
         }
     }
 
+    private Result executeAttempts(AgentMemoryService.Session session, AgentRunService.AgentRun run,
+                                   String mode, String question, String memoryContext,
+                                   Consumer<AgentEvent> events) {
+        AgentRunService.Checkpoint checkpoint = run.getCheckpoint();
+        if (checkpoint == null) {
+            checkpoint = new AgentRunService.Checkpoint();
+            run.setCheckpoint(checkpoint);
+        }
+        if (checkpoint.getStrategies().isEmpty()) {
+            AgentPreflightService.Preflight check = preflight.check(question);
+            runs.addStep(run, "PREFLIGHT", check.summary(), String.join("\n", check.warnings()), check.ok());
+            events.accept(new AgentEvent("preflight", check.summary(), String.join("\n", check.warnings())));
+            if (!check.ok()) {
+                String failed = "预检未通过，未消耗执行预算：" + String.join("；", check.blockers());
+                memory.append(session.getId(), "assistant", failed, "MEDIUM", "error");
+                runs.finish(run, failed, "FAILED", failed);
+                events.accept(new AgentEvent("error", "预检未通过", failed));
+                events.accept(new AgentEvent("done", "预检失败", run.getId()));
+                return new Result(session.getId(), run.getId(), mode, failed, failed);
+            }
+            AgentStrategyService.StrategyPlan plan = strategies.plan(question, memoryContext, mode);
+            checkpoint.setSuccessCriteria(plan.successCriteria());
+            checkpoint.setStrategies(plan.strategies());
+            checkpoint.setTaskBudget(plan.taskBudget());
+            checkpoint.setStrategyIndex(0);
+            runs.checkpoint(run);
+            events.accept(new AgentEvent("strategy", "生成了 " + plan.strategies().size() + " 条候选路线",
+                    strategyText(plan.strategies())));
+        }
+
+        int index = checkpoint.getStrategyIndex();
+        AgentRunService.AttemptRecord attempt = null;
+        AgentRunService.AttemptRecord last = lastAttempt(checkpoint);
+        if (last != null && isResumable(last)) {
+            int found = findStrategyIndex(checkpoint, last.getStrategyId());
+            if (found >= 0) {
+                index = found;
+                attempt = last;
+                attempt.setStatus("RUNNING");
+                checkpoint.setStrategyIndex(index);
+                runs.checkpoint(run);
+                events.accept(new AgentEvent("attempt_start", "继续尝试 " + (index + 1) + "/"
+                        + checkpoint.getStrategies().size(), attempt.getStrategyTitle()));
+            }
+        } else if (last != null && ("FAILED".equals(last.getStatus()) || "SUCCESS".equals(last.getStatus()))) {
+            int found = findStrategyIndex(checkpoint, last.getStrategyId());
+            if (found >= 0 && index <= found) {
+                index = found + 1;
+                checkpoint.setStrategyIndex(index);
+                runs.checkpoint(run);
+            }
+        }
+
+        while (index < checkpoint.getStrategies().size()) {
+            if (isCancelled(run)) return pauseAttempt(session, run, mode, attempt, events);
+            AgentRunService.Strategy strategy = checkpoint.getStrategies().get(index);
+            if (attempt == null || !strategy.getId().equals(attempt.getStrategyId())) {
+                attempt = newAttempt(strategy);
+                checkpoint.getAttempts().add(attempt);
+                checkpoint.setStrategyIndex(index);
+                checkpoint.setPhase(mode);
+                checkpoint.setReact(new AgentRunService.ReActState());
+                checkpoint.setPlan(new AgentRunService.PlanState());
+                runs.checkpoint(run);
+                runs.addStep(run, "ATTEMPT", "尝试路线 " + (index + 1) + "/" + checkpoint.getStrategies().size(),
+                        strategy.getTitle() + "：" + strategy.getApproach(), true);
+                events.accept(new AgentEvent("attempt_start", "尝试路线 " + (index + 1) + "/"
+                        + checkpoint.getStrategies().size(), strategy.getTitle() + "\n" + strategy.getApproach()));
+            }
+            int remaining = checkpoint.getTaskBudget() - checkpoint.getTaskSpent();
+            if (remaining < 4) break;
+            int allocation = Math.min(12, remaining);
+            attempt.setBudgetAllocated(allocation);
+            attempt.setStatus("RUNNING");
+            AgentTaskContext.set(session.getId(), run.getId(), attempt.getId());
+            String attemptTask = attemptPrompt(question, strategy, checkpoint);
+            String answer;
+            try {
+                if ("plan".equals(mode)) {
+                    checkpoint.setPhase("plan");
+                    runs.checkpoint(run);
+                    answer = planExecute.run(attemptTask, memoryContext, run, events);
+                } else {
+                    checkpoint.setPhase("react");
+                    runs.checkpoint(run);
+                    answer = react.run(attemptTask, memoryContext, run,
+                            checkpoint.getReact(), events, allocation);
+                }
+            } catch (Exception ex) {
+                log.warn("Attempt {} failed: {}", attempt.getId(), ex.getMessage(), ex);
+                failAttempt(session, run, checkpoint, attempt, strategy, checkpoint.getReact().getTools(),
+                        "TOOL", ex.getMessage(), events);
+                index++;
+                checkpoint.setStrategyIndex(index);
+                attempt = null;
+                continue;
+            }
+
+            if (isCancelled(run)) return pauseAttempt(session, run, mode, attempt, events);
+            int spent = "plan".equals(mode)
+                    ? Math.max(1, checkpoint.getPlan().getPlanIndex() * 8)
+                    : Math.max(1, checkpoint.getReact().getStep());
+            int budgetDelta = Math.max(0, spent - attempt.getBudgetSpent());
+            attempt.setBudgetSpent(Math.max(attempt.getBudgetSpent(), spent));
+            checkpoint.setTaskSpent(checkpoint.getTaskSpent() + budgetDelta);
+            attempt.setAnswer(answer);
+            attempt.setArtifacts(artifactPaths(run, attempt));
+            attempt.setSuccessfulTools(countTools(checkpoint, true));
+            attempt.setFailedTools(countTools(checkpoint, false));
+            runs.checkpoint(run);
+
+            Verdict verdict = verifyAttempt(question, run, checkpoint, attempt, answer);
+            if (verdict.passed()) {
+                attempt.setStatus("SUCCESS");
+                attempt.setEndedAt(java.time.Instant.now().toString());
+                strategy.setStatus("SUCCESS");
+                checkpoint.setBestAnswer(answer);
+                checkpoint.setBestAttemptId(attempt.getId());
+                checkpoint.setStrategyIndex(index + 1);
+                runs.checkpoint(run);
+                runs.addStep(run, "ATTEMPT", "路线通过", attempt.getStrategyTitle(), true);
+                events.accept(new AgentEvent("attempt_success", "路线 " + (index + 1) + " 通过",
+                        attempt.getStrategyTitle() + "：" + verdict.reason()));
+                return finishSuccess(session, run, mode, answer, verdict.reason(), events);
+            }
+
+            failAttempt(session, run, checkpoint, attempt, strategy, checkpoint.getReact().getTools(),
+                    verdict.failureType(), verdict.reason(), events);
+            index++;
+            checkpoint.setStrategyIndex(index);
+            attempt = null;
+        }
+
+        return finishBestEffort(session, run, mode, checkpoint, events);
+    }
+
+    private AgentRunService.AttemptRecord newAttempt(AgentRunService.Strategy strategy) {
+        AgentRunService.AttemptRecord attempt = new AgentRunService.AttemptRecord();
+        attempt.setId("att-" + java.util.UUID.randomUUID().toString().substring(0, 8));
+        attempt.setStrategyId(strategy.getId());
+        attempt.setStrategyTitle(strategy.getTitle());
+        attempt.setApproach(strategy.getApproach());
+        attempt.setStatus("RUNNING");
+        attempt.setStartedAt(java.time.Instant.now().toString());
+        return attempt;
+    }
+
+    private AgentRunService.AttemptRecord lastAttempt(AgentRunService.Checkpoint checkpoint) {
+        return checkpoint.getAttempts().isEmpty()
+                ? null : checkpoint.getAttempts().get(checkpoint.getAttempts().size() - 1);
+    }
+
+    private boolean isResumable(AgentRunService.AttemptRecord attempt) {
+        return "RUNNING".equals(attempt.getStatus()) || "PAUSED".equals(attempt.getStatus());
+    }
+
+    private int findStrategyIndex(AgentRunService.Checkpoint checkpoint, String strategyId) {
+        for (int i = 0; i < checkpoint.getStrategies().size(); i++) {
+            if (checkpoint.getStrategies().get(i).getId().equals(strategyId)) return i;
+        }
+        return -1;
+    }
+
+    private void failAttempt(AgentMemoryService.Session session, AgentRunService.AgentRun run,
+                             AgentRunService.Checkpoint checkpoint, AgentRunService.AttemptRecord attempt,
+                             AgentRunService.Strategy strategy, List<AgentRunService.ToolRecord> tools,
+                             String failureType, String reason, Consumer<AgentEvent> events) {
+        attempt.setStatus("FAILED");
+        attempt.setEndedAt(java.time.Instant.now().toString());
+        attempt.setFailureType(failureType);
+        attempt.setFailureReason(reason);
+        attempt.setArtifacts(artifactPaths(run, attempt));
+        attempt.setSuccessfulTools(countTools(checkpoint, true));
+        attempt.setFailedTools(countTools(checkpoint, false));
+        String reflection = failures.reflect(run.getQuestion(), attempt, failureType, reason);
+        attempt.setReflection(reflection);
+        strategy.setStatus("FAILED");
+        runs.checkpoint(run);
+        runs.addStep(run, "ATTEMPT", "路线失败", attempt.getStrategyTitle() + "：" + reason, false);
+        events.accept(new AgentEvent("attempt_failed", "路线 " + attempt.getStrategyTitle() + " 失败",
+                failureType + "：" + reason));
+        events.accept(new AgentEvent("reflection", "下次尝试的教训", reflection));
+        checkpoint.setReact(new AgentRunService.ReActState());
+        checkpoint.setPlan(new AgentRunService.PlanState());
+        runs.checkpoint(run);
+    }
+
+    private Result pauseAttempt(AgentMemoryService.Session session, AgentRunService.AgentRun run,
+                                String mode, AgentRunService.AttemptRecord attempt,
+                                Consumer<AgentEvent> events) {
+        if (attempt != null) {
+            AgentRunService.Checkpoint checkpoint = run.getCheckpoint();
+            int spent = "plan".equals(mode)
+                    ? Math.max(1, checkpoint.getPlan().getPlanIndex() * 8)
+                    : Math.max(1, checkpoint.getReact().getStep());
+            int delta = Math.max(0, spent - attempt.getBudgetSpent());
+            attempt.setBudgetSpent(Math.max(attempt.getBudgetSpent(), spent));
+            checkpoint.setTaskSpent(checkpoint.getTaskSpent() + delta);
+            attempt.setStatus("PAUSED");
+            runs.checkpoint(run);
+        }
+        String paused = "任务已按请求暂停，当前尝试进度已写入 checkpoint。";
+        runs.finish(run, paused, "PAUSED", "PAUSED");
+        events.accept(new AgentEvent("answer", paused, "已暂停，可恢复"));
+        events.accept(new AgentEvent("done", "已暂停", run.getId()));
+        return new Result(session.getId(), run.getId(), mode, paused, "PAUSED");
+    }
+
+    private Result finishSuccess(AgentMemoryService.Session session, AgentRunService.AgentRun run,
+                                 String mode, String answer, String validation,
+                                 Consumer<AgentEvent> events) {
+        List<AgentArtifactService.Artifact> produced = artifacts.listRun(run.getId());
+        events.accept(new AgentEvent("artifacts",
+                produced.isEmpty() ? "本轮没有生成文件产物" : "生成了 " + produced.size() + " 个文件",
+                artifacts.json(produced)));
+        memory.append(session.getId(), "assistant", answer, "MEDIUM", "answer");
+        runs.finish(run, answer, "DONE", validation);
+        events.accept(new AgentEvent("answer", answer, validation));
+        events.accept(new AgentEvent("done", "完成", run.getId()));
+        return new Result(session.getId(), run.getId(), mode, answer, validation);
+    }
+
+    private Result finishBestEffort(AgentMemoryService.Session session, AgentRunService.AgentRun run,
+                                    String mode, AgentRunService.Checkpoint checkpoint,
+                                    Consumer<AgentEvent> events) {
+        AgentRunService.AttemptRecord best = null;
+        for (AgentRunService.AttemptRecord attempt : checkpoint.getAttempts()) {
+            if (attempt.getAnswer() == null || attempt.getAnswer().isBlank()) continue;
+            if (best == null || attempt.getAnswer().length() > best.getAnswer().length()) best = attempt;
+        }
+        String answer = best != null ? best.getAnswer()
+                : "已尝试 " + checkpoint.getAttempts().size() + " 条路线，但没有得到可用结果。";
+        String reason = "已尝试 " + checkpoint.getAttempts().size() + " 条路线，全部未通过完整验收";
+        checkpoint.setBestAnswer(answer);
+        if (best != null) checkpoint.setBestAttemptId(best.getId());
+        runs.checkpoint(run);
+        List<AgentArtifactService.Artifact> produced = artifacts.listRun(run.getId());
+        events.accept(new AgentEvent("artifacts",
+                produced.isEmpty() ? "本轮没有生成文件产物" : "生成了 " + produced.size() + " 个文件",
+                artifacts.json(produced)));
+        memory.append(session.getId(), "assistant", answer, "MEDIUM", "answer");
+        runs.finish(run, answer, "DONE", reason);
+        events.accept(new AgentEvent("validation", "多路线尝试结束", reason));
+        events.accept(new AgentEvent("answer", answer, reason));
+        events.accept(new AgentEvent("done", "完成（部分）", run.getId()));
+        return new Result(session.getId(), run.getId(), mode, answer, reason);
+    }
+
+    private String attemptPrompt(String question, AgentRunService.Strategy strategy,
+                                 AgentRunService.Checkpoint checkpoint) {
+        StringBuilder previous = new StringBuilder();
+        for (AgentRunService.AttemptRecord prior : checkpoint.getAttempts()) {
+            if ("FAILED".equals(prior.getStatus()) && prior.getReflection() != null) {
+                previous.append("- ").append(prior.getStrategyTitle()).append("：")
+                        .append(prior.getReflection()).append("\n");
+            }
+        }
+        return """
+                原始任务：%s
+
+                本次只执行这一条候选路线：
+                路线：%s
+                做法：%s
+                已知风险：%s
+                备选：%s
+
+                成功标准：%s
+
+                之前失败的教训（不要重复）：
+                %s
+
+                请认真执行当前路线。如果当前路线被验证为不可行，请明确说明失败原因，
+                系统会切换到下一条路线，而不是无限重复同一动作。
+                """.formatted(question, strategy.getTitle(), strategy.getApproach(),
+                strategy.getRisk(), strategy.getFallback(), checkpoint.getSuccessCriteria(),
+                previous.length() == 0 ? "（无）" : previous.toString());
+    }
+
+    private List<String> artifactPaths(AgentRunService.AgentRun run, AgentRunService.AttemptRecord attempt) {
+        String prefix = "attempts/" + attempt.getId() + "/";
+        return artifacts.listRun(run.getId()).stream()
+                .map(AgentArtifactService.Artifact::path)
+                .filter(path -> path.startsWith(prefix))
+                .toList();
+    }
+
+    private int countTools(AgentRunService.Checkpoint checkpoint, boolean success) {
+        return (int) checkpoint.getReact().getTools().stream()
+                .filter(tool -> tool.isSuccess() == success).count();
+    }
+
+    private boolean expectsArtifact(String task) {
+        return task != null && task.matches("(?is).*(生成|创建|制作|导出|输出|写|做).*(pptx?|docx?|word|xlsx?|excel|pdf|html|图片|插画|海报|演示文稿|文档).*");
+    }
+
+    private boolean expectsExecution(String task) {
+        return task != null && task.matches("(?is).*(脚本|运行|执行|python|node|命令|转换|爬取|抓取).*");
+    }
+
+    private Verdict verifyAttempt(String question, AgentRunService.AgentRun run,
+                                  AgentRunService.Checkpoint checkpoint,
+                                  AgentRunService.AttemptRecord attempt, String answer) {
+        if (answer == null || answer.isBlank()) {
+            return new Verdict(false, "没有生成回答", "LOGIC");
+        }
+        if (answer.contains("步数已达到上限") || answer.contains("没有生成有效回答")) {
+            return new Verdict(false, "执行达到预算上限", "BUDGET");
+        }
+        List<String> produced = attempt.getArtifacts() == null ? List.of() : attempt.getArtifacts();
+        if (expectsArtifact(question) && produced.isEmpty()) {
+            return new Verdict(false, "任务要求文件产物，但当前路线没有生成文件", "ENVIRONMENT");
+        }
+        if (expectsExecution(question) && "react".equals(run.getMode())
+                && checkpoint.getReact().getTools().stream().noneMatch(tool ->
+                tool.isSuccess() && ("run_script".equals(tool.getAction()) || "run_command".equals(tool.getAction())))) {
+            return new Verdict(false, "任务要求真实执行，但当前路线没有成功运行脚本或命令", "TOOL");
+        }
+        Validation validation = validate(question, answer, artifacts.manifestRun(run.getId()),
+                checkpoint.getSuccessCriteria());
+        return new Verdict(validation.passed(), validation.reason(),
+                validation.passed() ? "" : "LOGIC");
+    }
+
+    private String strategyText(List<AgentRunService.Strategy> strategies) {
+        StringBuilder sb = new StringBuilder();
+        for (AgentRunService.Strategy strategy : strategies) {
+            sb.append(strategy.getId()).append(". ").append(strategy.getTitle())
+                    .append("：").append(strategy.getApproach()).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private record Verdict(boolean passed, String reason, String failureType) {
+    }
+
     private boolean hasProgress(AgentRunService.AgentRun run) {
         AgentRunService.Checkpoint cp = run.getCheckpoint();
         if (cp == null) return false;
+        if (cp.getAttempts() != null && !cp.getAttempts().isEmpty()) return true;
         if ("plan".equals(cp.getPhase())) {
             return cp.getPlan() != null && (cp.getPlan().getPlanIndex() > 0 || cp.getPlan().getCurrent() != null);
         }
@@ -204,14 +466,20 @@ public class AgentOrchestrator {
     }
 
     public Validation validate(String task, String answer, String artifactManifest) {
+        return validate(task, answer, artifactManifest, "");
+    }
+
+    public Validation validate(String task, String answer, String artifactManifest, String successCriteria) {
         String system = """
-                你是独立验收员。你只能看到用户任务、候选结果和产物目录清单，看不到执行者的思考过程。
+                你是独立验收员。你只能看到用户任务、候选结果、产物目录清单和本任务的成功标准，看不到执行者的思考过程。
                 判断结果是否真正完成任务；如果只是声称做了、空泛、遗漏关键产物、或答非所问，就不通过。
                 如果任务要求生成文件（pptx/docx/xlsx/pdf/html/图片等），产物清单中必须有对应文件；
                 只有文字说明而没有产物时，不能通过。
                 只输出 JSON：{"passed":true/false,"reason":"一句中文理由"}。
                 """;
-        String user = "用户任务：\n" + task + "\n\n候选结果：\n" + answer
+        String user = "用户任务：\n" + task + "\n\n成功标准：\n"
+                + (successCriteria == null || successCriteria.isBlank() ? "产物真实可用，回答直接解决问题" : successCriteria)
+                + "\n\n候选结果：\n" + answer
                 + "\n\n产物清单：\n" + (artifactManifest == null ? "无" : artifactManifest);
         try {
             JsonNode json = llm.completeJson(system, user, 45);
