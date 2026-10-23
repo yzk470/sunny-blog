@@ -646,17 +646,22 @@ public class AgentOrchestrator {
 
     private int selectNextIndex(AgentRunService.Checkpoint checkpoint) {
         AgentRunService.SearchNode best = null;
+        int bestIndex = -1;
         for (AgentRunService.SearchNode node : checkpoint.getSearch().getNodes()) {
             if (!"PENDING".equals(node.getStatus())) continue;
-            if (best == null || node.getScore() > best.getScore()) best = node;
-        }
-        if (best == null) return -1;
-        int bestIndex = -1;
-        for (int i = 0; i < checkpoint.getStrategies().size(); i++) {
-            AgentRunService.Strategy strategy = checkpoint.getStrategies().get(i);
-            if (strategy.getId().equals(best.getStrategyId()) && "PENDING".equals(strategy.getStatus())) {
-                bestIndex = i;
-                break;
+            int candidateIndex = -1;
+            for (int i = 0; i < checkpoint.getStrategies().size(); i++) {
+                AgentRunService.Strategy strategy = checkpoint.getStrategies().get(i);
+                if (strategy.getId().equals(node.getStrategyId())
+                        && "PENDING".equals(strategy.getStatus())) {
+                    candidateIndex = i;
+                    break;
+                }
+            }
+            if (candidateIndex < 0) continue;
+            if (best == null || node.getScore() > best.getScore()) {
+                best = node;
+                bestIndex = candidateIndex;
             }
         }
         return bestIndex;

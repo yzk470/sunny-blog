@@ -2,6 +2,8 @@ package com.sunnyblog.agent;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -38,6 +40,31 @@ class AgentSearchTest {
         assertTrue(policy.attemptBudget("react", 30, true) <= 14);
         assertTrue(policy.attemptBudget("plan", 30, false) <= 24);
         assertEquals(2, policy.attemptBudget("react", 2, false));
+    }
+
+    @Test
+    void reflectionExpandsAndReprioritizesBranches() {
+        AgentLlmService llm = mock(AgentLlmService.class);
+        when(llm.isConfigured()).thenReturn(false);
+        AgentSearchService search = new AgentSearchService(llm);
+        AgentRunService.Strategy failed = new AgentRunService.Strategy();
+        failed.setId("s1");
+        failed.setTitle("python-pptx");
+        failed.setApproach("直接生成");
+        AgentFailureService.Reflection reflection = new AgentFailureService.Reflection(
+                "ENVIRONMENT", "python-pptx 可用", "ModuleNotFoundError",
+                List.of("不要直接 import pptx"),
+                List.of("先检查依赖"),
+                List.of("s1"),
+                List.of("switch_tool:改用 HTML 生成", "add_preflight:先检查依赖"),
+                "所有 PPT 路线必须先做依赖预检", "依赖失败，换路线");
+        List<AgentRunService.Strategy> children = search.expand("生成 PPT", failed, reflection, 3, 2);
+        assertEquals(2, children.size());
+        assertTrue(children.get(0).getApproach().contains("依赖预检"));
+        List<AgentSearchService.Scored> rescored = search.rescore("生成 PPT",
+                List.of(failed, children.get(0)), reflection);
+        assertEquals(0, rescored.stream().filter(s -> s.strategy().getId().equals("s1"))
+                .findFirst().orElseThrow().score());
     }
 
     @Test

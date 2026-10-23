@@ -107,14 +107,16 @@ public class AgentSearchService {
         for (Scored scored : base) {
             int score = scored.score();
             String text = scored.strategy().getTitle() + " " + scored.strategy().getApproach();
-            if (reflection.invalidatesStrategyIds() != null
-                    && reflection.invalidatesStrategyIds().contains(scored.strategy().getId())) {
+            boolean invalidated = reflection.invalidatesStrategyIds() != null
+                    && reflection.invalidatesStrategyIds().contains(scored.strategy().getId());
+            if (invalidated) {
                 score = 0;
+            } else {
+                if (reflection.globalConstraint() != null && !reflection.globalConstraint().isBlank()) {
+                    score += 2;
+                }
+                if (text.contains("修复")) score += 8;
             }
-            if (reflection.globalConstraint() != null && !reflection.globalConstraint().isBlank()) {
-                score += 2;
-            }
-            if (text.contains("修复")) score += 8;
             adjusted.add(new Scored(scored.strategy(), Math.max(0, Math.min(100, score))));
         }
         adjusted.sort(Comparator.comparingInt(Scored::score).reversed());
