@@ -4,30 +4,46 @@
 
 ## 任务集
 
-`tasks.json` 覆盖：
+`tasks.json` 现在包含 14 个失败注入任务：
 
-- 简单问答
-- 脚本执行
-- 文本产物
-- HTML 产物
-- Plan 多步骤
-- 高价值系统设计
+| 类型 | 任务 |
+|---|---|
+| ENVIRONMENT | env-script、env-artifact |
+| TRANSIENT | transient-script、transient-html |
+| TOOL | tool-write、tool-script |
+| FORMAT | format-answer、format-artifact |
+| LOGIC | logic-answer、logic-plan |
+| BUDGET | budget-script、budget-plan |
+| UNSAT | unsat-file、unsat-tool |
 
 每个任务包含：
 
 ```json
 {
-  "id": "script-run",
-  "message": "写一个 Python 脚本计算 2+2 并运行，告诉我结果。",
+  "id": "env-script",
+  "message": "写一个 Python 脚本计算 3+3 并运行，告诉我结果。",
   "mode": "react",
+  "fault": "ENVIRONMENT",
   "checks": {
-    "contains": ["4"],
+    "contains": ["6"],
     "execution": true,
     "artifactExt": ["txt"],
     "maxSeconds": 120
   }
 }
 ```
+
+## 失败类型
+
+| 类型 | 含义 | 正确处理 |
+|---|---|---|
+| ENVIRONMENT | 依赖、路径、权限、工具目录问题 | 预检、换实现 |
+| TRANSIENT | 超时、网络抖动、限流 | 短暂重试 |
+| TOOL | 工具参数或执行失败 | 读错误、改参数 |
+| FORMAT | JSON/XML/协议格式错误 | 修正格式 |
+| LOGIC | 路线假设错误、验收失败 | 反思、换路线 |
+| BUDGET | 任务/尝试预算耗尽 | 缩小范围或换路线 |
+| UNSAT | 当前能力无法完成 | 明确说明限制 |
 
 ## 变体
 
@@ -56,6 +72,20 @@ python benchmarks/agent/run_benchmark.py --variants dynamic --repeats 1
 python benchmarks/agent/run_benchmark.py --repeats 3
 ```
 
+后台也可以直接启动：
+
+```text
+AGENT → 基准测试
+```
+
+页面支持：
+
+- 勾选 linear / static / dynamic
+- 每任务重复次数，默认 3
+- 实时运行日志
+- 变体对比
+- 任务结果点击进入执行链路
+
 ## 输出
 
 ```text
@@ -81,30 +111,34 @@ benchmarks/agent/reports/latest.md
 - 高价值任务（如系统设计）会启用更贵的最佳优先搜索。
 - 失败注入的单元测试在 `AgentSearchTest`；该 runner 负责真实端到端任务指标。
 
-## 首轮结果（5 个基础任务，单轮）
+## 首轮验证（ENVIRONMENT 注入，单任务）
 
-| Variant | Success | First attempt | Recovered | Avg attempts | Avg budget | Cost/success | P95 |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| linear | 100% | 4 | 1 | 1.0 | 9.4 | 9.4 | 30.1s |
-| static | 100% | 3 | 2 | 1.6 | 17.8 | 17.8 | 71.3s |
-| dynamic | 100% | 4 | 1 | 1.2 | 12.6 | 12.6 | 35.9s |
+已在线上对比 linear 与 dynamic：
 
-结论：基础任务太简单，三种策略都能完成；静态搜索和动态搜索的成本更高，但首轮样本没有体现成功率收益。
+| 变体 | 成功 | 首次成功 | 尝试 | 预算 | 耗时 | 恢复 |
+|---|---:|---:|---:|---:|---:|---:|
+| linear | 0% | 0 | 1 | 4 | 21.4s | 0 |
+| dynamic | 100% | 0 | 2 | 15 | 59.6s | 1 |
 
-高价值系统设计任务单轮抽样：
+结论：
 
 ```text
-linear:  1 次尝试，预算 16，约 155s，成功
-static:  2 次尝试，预算 48，约 313s，成功
-dynamic: 1 次尝试，预算 32，约 123s，成功
+linear 在首次注入 ENVIRONMENT 故障后直接失败
+dynamic 识别失败、换路线后成功
+代价是约 3.75 倍预算、约 2.8 倍耗时
 ```
 
-同样只有 1 个样本，不能据此断言动态搜索更优。要得到可信结论，应：
+这说明恢复机制确实生效，也说明“失败恢复”不是免费的。
+
+## 指标定义
 
 ```text
-增加失败注入任务（依赖缺失、权限、超时、格式错误）
-每个任务重复 3 次以上
-分别统计成功率、恢复率、成本和 P95
+首次成功率 = 没有失败 attempt 的成功任务 / 总任务
+失败恢复率 = 失败后最终成功的任务 / 有失败 attempt 的任务
+平均尝试次数 = 每个任务的平均 attempt 数
+平均预算 = 每个任务的 taskSpent
+单成功成本 = 总 taskSpent / 成功任务数
+P95 延迟 = 任务耗时的 95 分位
 ```
 
 报告文件：
