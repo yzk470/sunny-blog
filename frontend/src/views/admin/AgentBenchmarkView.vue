@@ -11,6 +11,7 @@ const running = ref(false)
 const loading = ref(true)
 const variants = ref<string[]>(['linear', 'static', 'dynamic'])
 const repeats = ref(3)
+const runGroup = ref<'capability' | 'security'>('capability')
 const timer = ref<number | null>(null)
 
 const report = computed(() => {
@@ -47,6 +48,7 @@ async function start() {
     status.value = await agentApi.startBenchmark({
       variants: variants.value.join(','),
       repeats: repeats.value,
+      group: runGroup.value,
       taskIds: [],
     })
     running.value = true
@@ -108,6 +110,17 @@ onBeforeUnmount(() => {
     <div class="benchmark-layout">
       <section class="admin-panel benchmark-form">
         <h2>运行配置</h2>
+        <label>测试类型</label>
+        <div class="benchmark-groups">
+          <button type="button" :class="{ active: runGroup === 'capability' }" @click="runGroup = 'capability'">
+            能力稳定性
+            <small>Agent 应该完成的任务</small>
+          </button>
+          <button type="button" :class="{ active: runGroup === 'security' }" @click="runGroup = 'security'">
+            安全防护
+            <small>Agent 不应该做到的事</small>
+          </button>
+        </div>
         <label>变体</label>
         <label v-for="item in [
           ['linear', '单路线基线：一条策略，16 预算'],
@@ -120,8 +133,8 @@ onBeforeUnmount(() => {
         <label>每任务重复次数</label>
         <input v-model.number="repeats" type="number" min="1" max="5" />
         <p class="benchmark-note">
-          18 个任务（14 个故障 + 4 个目录权限）× 3 变体 × 3 次 ≈ 162 次真实运行。
-          POLICY 任务被拒绝才算通过，不计入合法任务成功率。
+          {{ runGroup === 'capability' ? '12 个能力任务' : '6 个安全任务' }} × 3 变体 × 3 次。
+          能力测试看稳定性和成本；安全测试看拒绝率与越权次数。
         </p>
         <div class="benchmark-actions">
           <button class="btn btn-primary" :disabled="running" @click="start">
@@ -160,8 +173,8 @@ onBeforeUnmount(() => {
               <td><strong>{{ row.variant }}</strong></td>
               <td>{{ row.tasks }}</td>
               <td>{{ pct(row.successRate) }}</td>
-              <td>{{ row.policyTasks }}</td>
-              <td>{{ pct(row.policyPassRate) }}</td>
+              <td>{{ row.securityTasks }}</td>
+              <td>{{ row.securityTasks ? pct(row.securityPassRate) : '-' }}</td>
               <td>{{ row.scopeViolations }}</td>
               <td>{{ row.firstAttemptSuccess }}</td>
               <td>{{ row.recovered }}</td>
@@ -210,6 +223,10 @@ onBeforeUnmount(() => {
 .admin-panel { padding: 16px; border: 1px solid rgba(98, 119, 139, 0.13); border-radius: 15px; background: #fff; }
 .admin-panel h2 { margin: 0 0 13px; color: #3b5266; font-size: 15px; }
 .benchmark-form label { display: block; margin: 11px 0 5px; color: #8a97a2; font-size: 10px; }
+.benchmark-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 5px 0 10px; }
+.benchmark-groups button { border: 1px solid rgba(103, 126, 146, 0.18); border-radius: 10px; background: #f8fafb; padding: 9px; text-align: left; color: #60788c; font-size: 11px; cursor: pointer; }
+.benchmark-groups button small { display: block; margin-top: 3px; color: #9aa7b1; font-size: 9px; }
+.benchmark-groups button.active { border-color: #b99472; background: #faf4ec; color: #7f5b40; }
 .benchmark-form > input { width: 100%; padding: 8px; border: 1px solid rgba(103, 126, 146, 0.2); border-radius: 8px; box-sizing: border-box; }
 .benchmark-check { display: flex !important; gap: 8px; align-items: flex-start; padding: 6px 0; cursor: pointer; }
 .benchmark-check input { margin-top: 3px; }

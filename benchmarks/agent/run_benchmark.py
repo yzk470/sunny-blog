@@ -161,6 +161,7 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
             attempt_success = True
 
     checks = task.get("checks", {})
+    is_security = task.get("group") == "security" or bool(checks.get("expectPolicyDenied") or task.get("policy"))
     is_policy = bool(checks.get("expectPolicyDenied") or task.get("policy"))
     failures: list[str] = []
     if not http_ok:
@@ -208,6 +209,9 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
         "task": task["id"],
         "variant": variant,
         "fault": task.get("fault", ""),
+        "group": "security" if is_security else "capability",
+        "security": is_security,
+        "securityPass": not failures if is_security else None,
         "policy": is_policy,
         "policyPass": not failures if is_policy else None,
         "scopeViolation": scope_violation or outside_artifact,
@@ -229,8 +233,8 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
 
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    allowed = [r for r in rows if not r.get("policy")]
-    policy = [r for r in rows if r.get("policy")]
+    allowed = [r for r in rows if r.get("group") != "security"]
+    policy = [r for r in rows if r.get("group") == "security"]
     successes = sum(1 for r in allowed if r["success"])
     policy_passed = sum(1 for r in policy if r["success"])
     failed = [r for r in allowed if not r["success"]]
@@ -241,9 +245,9 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     p95 = sorted(durations)[max(0, int(len(durations) * 0.95) - 1)] if durations else 0
     return {
         "tasks": len(allowed),
-        "policyTasks": len(policy),
-        "policyPassed": policy_passed,
-        "policyPassRate": round(policy_passed / len(policy), 4) if policy else 1.0,
+        "securityTasks": len(policy),
+        "securityPassed": policy_passed,
+        "securityPassRate": round(policy_passed / len(policy), 4) if policy else 1.0,
         "scopeViolations": sum(1 for r in rows if r.get("scopeViolation")),
         "successes": successes,
         "successRate": round(successes / len(allowed), 4) if allowed else 0,
@@ -266,10 +270,13 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=360)
     parser.add_argument("--task-ids", default="")
+    parser.add_argument("--group", default="all", choices=["all", "capability", "security"])
     parser.add_argument("--report-dir", default=str(ROOT / "reports"))
     args = parser.parse_args()
 
     tasks = json.loads(Path(args.tasks).read_text(encoding="utf-8"))
+    if args.group != "all":
+        tasks = [task for task in tasks if task.get("group") == args.group]
     if args.task_ids:
         keep = {item.strip() for item in args.task_ids.split(",") if item.strip()}
         tasks = [task for task in tasks if task["id"] in keep]
@@ -287,25 +294,26 @@ def main() -> int:
 
     by_variant = {variant: summarize([r for r in rows if r["variant"] == variant])
                   for variant in variants}
-    report = {"base": args.base, "timestamp": int(time.time()), "rows": rows, "summary": by_variant}
+    report = {"base": args.base, "group": args.group, "timestamp": int(time.time()),
+              "rows": rows, "summary": by_variant}
     report_dir = Path(args.report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
     (report_dir / "latest.json").write_text(json.dumps(report, ensure_ascii=False, indent=2),
                                             encoding="utf-8")
     lines = ["# Agent Benchmark", "", f"Base: `{args.base}`", "",
-             "| Variant | Allowed tasks | Allowed success | Policy tests | Policy pass | Scope violations | First attempt | Recovered | Avg attempts | Avg budget | Cost/success | P95 |",
+             "| Variant | Capability tasks | Capability success | Security tests | Security pass | Scope violations | First attempt | Recovered | Avg attempts | Avg budget | Cost/success | P95 |",
              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for variant, s in by_variant.items():
         lines.append(
             f"| {variant} | {s['tasks']} | {s['successRate']*100:.1f}% | "
-            f"{s['policyTasks']} | {s['policyPassRate']*100:.1f}% | {s['scopeViolations']} | "
+            f"{s['securityTasks']} | {s['securityPassRate']*100:.1f}% | {s['scopeViolations']} | "
             f"{s['firstAttemptSuccess']} | {s['recovered']} | {s['avgAttempts']} | "
             f"{s['avgBudget']} | {s['costPerSuccess']} | {s['p95Seconds']}s |")
     lines.extend(["", "## Task results", "",
                   "| Variant | Task | Type | Pass | Status | Attempts | Budget | Duration | Failures |",
                   "|---|---|---|---:|---|---:|---:|---:|---|"])
     for row in rows:
-        kind = 'POLICY' if row.get('policy') else 'TASK'
+        kind = 'SECURITY' if row.get('security') else 'CAPABILITY'
         lines.append(f"| {row['variant']} | {row['task']} | {kind} | {'✅' if row['success'] else '❌'} | "
                      f"{row['status']} | {row['attemptCount']} | {row['taskSpent']} | "
                      f"{row['duration']}s | {', '.join(row['failures'])} |")

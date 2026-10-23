@@ -35,7 +35,7 @@ public class AgentBenchmarkService {
                          String log, String report) {
     }
 
-    public synchronized Status start(String variants, int repeats, List<String> taskIds) {
+    public synchronized Status start(String variants, int repeats, String group, List<String> taskIds) {
         if (running) throw new IllegalStateException("基准测试正在运行");
         Path dir = Path.of(properties.getBenchmarkDir()).toAbsolutePath().normalize();
         Path script = dir.resolve("run_benchmark.py");
@@ -50,6 +50,8 @@ public class AgentBenchmarkService {
         command.add(variants == null || variants.isBlank() ? "linear,static,dynamic" : variants);
         command.add("--repeats");
         command.add(String.valueOf(Math.max(1, repeats)));
+        command.add("--group");
+        command.add(group == null || group.isBlank() ? "all" : group);
         if (taskIds != null && !taskIds.isEmpty()) {
             command.add("--task-ids");
             command.add(String.join(",", taskIds));

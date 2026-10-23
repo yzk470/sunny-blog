@@ -29,7 +29,7 @@ public class AgentAdminController {
     public record SkillRequest(String slug, String name, String description, String content) {
     }
 
-    public record BenchmarkRequest(String variants, int repeats, List<String> taskIds) {
+    public record BenchmarkRequest(String variants, int repeats, String group, List<String> taskIds) {
     }
 
     @GetMapping("/skills")
@@ -118,7 +118,7 @@ public class AgentAdminController {
     public ApiResponse<AgentBenchmarkService.Status> startBenchmark(@RequestBody BenchmarkRequest request) {
         try {
             return ApiResponse.ok(benchmark.start(request.variants(),
-                    request.repeats() <= 0 ? 3 : request.repeats(), request.taskIds()));
+                    request.repeats() <= 0 ? 3 : request.repeats(), request.group(), request.taskIds()));
         } catch (Exception ex) {
             return ApiResponse.fail(500, ex.getMessage());
         }

@@ -285,7 +285,7 @@ export const agentApi = {
     if (failureType) query.set('failureType', failureType)
     return httpGet<AgentMetricTask[]>(`/admin/agent/metrics/tasks?${query.toString()}`)
   },
-  startBenchmark(payload: { variants: string; repeats: number; taskIds?: string[] }) {
+  startBenchmark(payload: { variants: string; repeats: number; group?: string; taskIds?: string[] }) {
     return httpPost<AgentBenchmarkStatus>('/admin/agent/benchmark/start', payload)
   },
   benchmarkStatus() {
