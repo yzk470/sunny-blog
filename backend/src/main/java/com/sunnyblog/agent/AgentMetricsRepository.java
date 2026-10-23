@@ -188,22 +188,34 @@ public class AgentMetricsRepository {
         List<DailyRow> result = new ArrayList<>();
         try {
             Timestamp since = Timestamp.from(Instant.now().minusSeconds(Math.max(1, days) * 86400L));
-            jdbc.query("""
-                    SELECT DATE(created_at) AS day,
-                           COUNT(*) AS tasks,
-                           COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END),0) AS successes,
-                           COALESCE(SUM(attempt_count),0) AS attempts,
-                           COALESCE(SUM(failed_attempt_count),0) AS failed_attempts,
-                           COALESCE(SUM(task_spent),0) AS steps,
-                           COALESCE(SUM(CASE WHEN high_value THEN 1 ELSE 0 END),0) AS hv_tasks,
-                           COALESCE(SUM(CASE WHEN high_value AND success THEN 1 ELSE 0 END),0) AS hv_success,
-                           COALESCE(SUM(branch_expanded),0) AS branches
-                    FROM agent_task_metric WHERE created_at >= ?
-                    GROUP BY DATE(created_at) ORDER BY day
-                    """, (rs, rowNum) -> new DailyRow(String.valueOf(rs.getDate("day")),
-                    rs.getLong("tasks"), rs.getLong("successes"), rs.getLong("attempts"),
-                    rs.getLong("failed_attempts"), rs.getLong("steps"),
-                    rs.getLong("hv_tasks"), rs.getLong("hv_success"), rs.getLong("branches")), since);
+            List<TaskRow> rows = jdbc.query("""
+                    SELECT run_id, session_id, mode, high_value, status, task_budget, task_spent,
+                           attempt_count, failed_attempt_count, branch_expanded, success, duration_ms, created_at
+                    FROM agent_task_metric WHERE created_at >= ? ORDER BY created_at
+                    """, (rs, rowNum) -> new TaskRow(
+                    rs.getString("run_id"), rs.getString("session_id"), rs.getString("mode"),
+                    rs.getBoolean("high_value"), rs.getString("status"), rs.getInt("task_budget"),
+                    rs.getInt("task_spent"), rs.getInt("attempt_count"),
+                    rs.getInt("failed_attempt_count"), rs.getInt("branch_expanded"),
+                    rs.getBoolean("success"), rs.getLong("duration_ms"),
+                    String.valueOf(rs.getTimestamp("created_at"))), since);
+            Map<String, long[]> byDay = new java.util.TreeMap<>();
+            for (TaskRow row : rows) {
+                String day = row.createdAt().length() >= 10 ? row.createdAt().substring(0, 10) : row.createdAt();
+                long[] value = byDay.computeIfAbsent(day, key -> new long[9]);
+                value[0]++;
+                if (row.success()) value[1]++;
+                value[2] += row.attemptCount();
+                value[3] += row.failedAttemptCount();
+                value[4] += row.taskSpent();
+                if (row.highValue()) value[5]++;
+                if (row.highValue() && row.success()) value[6]++;
+                value[7] += row.branchExpanded();
+            }
+            for (Map.Entry<String, long[]> entry : byDay.entrySet()) {
+                long[] v = entry.getValue();
+                result.add(new DailyRow(entry.getKey(), v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]));
+            }
         } catch (Exception ignored) {
         }
         return result;
