@@ -23,6 +23,7 @@ public class AgentAdminController {
     private final AgentSkillsService skills;
     private final AgentRunService runs;
     private final AgentArtifactService artifacts;
+    private final AgentMetricsService metrics;
 
     public record SkillRequest(String slug, String name, String description, String content) {
     }
@@ -78,6 +79,11 @@ public class AgentAdminController {
     public ApiResponse<AgentRunService.AgentRun> run(@PathVariable String id) {
         AgentRunService.AgentRun run = runs.get(id);
         return run == null ? ApiResponse.fail(404, "运行记录不存在") : ApiResponse.ok(run);
+    }
+
+    @GetMapping("/metrics")
+    public ApiResponse<AgentMetricsService.Snapshot> metrics() {
+        return ApiResponse.ok(metrics.snapshot());
     }
 
     @GetMapping("/artifacts")

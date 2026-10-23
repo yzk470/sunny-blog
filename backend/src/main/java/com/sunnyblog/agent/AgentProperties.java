@@ -18,4 +18,8 @@ public class AgentProperties {
     private String systemdRuntimeDir = "/run/user/999";
     private String systemdRunner = "/usr/local/bin/sunny-agent-run";
     private boolean systemdPrivateNetwork = true;
+    private boolean highValueSearchEnabled = true;
+    private int highValueSampleCount = 4;
+    private int highValueMaxBranches = 3;
+    private int highValueTaskBudget = 80;
 }

@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,6 +27,9 @@ public class AgentOrchestrator {
     private final AgentStrategyService strategies;
     private final AgentPreflightService preflight;
     private final AgentFailureService failures;
+    private final AgentSearchPolicy searchPolicy;
+    private final AgentSearchService search;
+    private final AgentMetricsService metrics;
     private final Map<String, ReentrantLock> sessionLocks = new ConcurrentHashMap<>();
 
     public record Result(String sessionId, String runId, String mode, String answer, String validation) {
@@ -129,18 +133,47 @@ public class AgentOrchestrator {
                 String failed = "预检未通过，未消耗执行预算：" + String.join("；", check.blockers());
                 memory.append(session.getId(), "assistant", failed, "MEDIUM", "error");
                 runs.finish(run, failed, "FAILED", failed);
+                metrics.record(run);
                 events.accept(new AgentEvent("error", "预检未通过", failed));
                 events.accept(new AgentEvent("done", "预检失败", run.getId()));
                 return new Result(session.getId(), run.getId(), mode, failed, failed);
             }
-            AgentStrategyService.StrategyPlan plan = strategies.plan(question, memoryContext, mode);
-            checkpoint.setSuccessCriteria(plan.successCriteria());
+            AgentSearchPolicy.Decision decision = searchPolicy.decide(question, mode);
+            AgentStrategyService.StrategyPlan plan = strategies.plan(question, memoryContext, mode,
+                    decision.sampleCount());            checkpoint.setSuccessCriteria(plan.successCriteria());
             checkpoint.setStrategies(plan.strategies());
-            checkpoint.setTaskBudget(plan.taskBudget());
+            checkpoint.setTaskBudget(decision.taskBudget());
+            checkpoint.setHighValue(decision.highValue());
+            checkpoint.getSearch().setEnabled(decision.highValue());
+            checkpoint.getSearch().setMode(decision.highValue() ? "BEST_FIRST" : "LINEAR");
+            checkpoint.getSearch().setSampleCount(decision.sampleCount());
+            checkpoint.getSearch().setMaxBranches(decision.maxBranches());
+            checkpoint.getSearch().setBranchesExpanded(0);
+            checkpoint.getSearch().getNodes().clear();
+            if (decision.highValue()) {
+                List<AgentSearchService.Scored> scored = search.rank(question, plan.strategies(), memoryContext);
+                List<AgentRunService.Strategy> ranked = new ArrayList<>();
+                for (AgentSearchService.Scored item : scored) {
+                    AgentRunService.SearchNode node = new AgentRunService.SearchNode();
+                    node.setId("node-" + item.strategy().getId());
+                    node.setStrategyId(item.strategy().getId());
+                    node.setTitle(item.strategy().getTitle());
+                    node.setScore(item.score());
+                    node.setStatus("PENDING");
+                    checkpoint.getSearch().getNodes().add(node);
+                    ranked.add(item.strategy());
+                }
+                int keep = Math.min(decision.maxBranches(), ranked.size());
+                checkpoint.setStrategies(new ArrayList<>(ranked.subList(0, keep)));
+                events.accept(new AgentEvent("search_start", "高价值任务启用多分支搜索",
+                        decision.reason() + "；候选 " + scored.size() + " 条，保留 " + keep + " 条"));
+                events.accept(new AgentEvent("branch_score", "路线评分完成",
+                        scoreText(checkpoint.getSearch().getNodes())));
+            }
             checkpoint.setStrategyIndex(0);
             runs.checkpoint(run);
-            events.accept(new AgentEvent("strategy", "生成了 " + plan.strategies().size() + " 条候选路线",
-                    strategyText(plan.strategies())));
+            events.accept(new AgentEvent("strategy", "生成了 " + checkpoint.getStrategies().size() + " 条候选路线",
+                    strategyText(checkpoint.getStrategies())));
         }
 
         int index = checkpoint.getStrategyIndex();
@@ -189,9 +222,18 @@ public class AgentOrchestrator {
             }
             int remaining = checkpoint.getTaskBudget() - checkpoint.getTaskSpent();
             if (remaining < 4) break;
-            int allocation = "plan".equals(mode) ? Math.min(24, remaining) : Math.min(12, remaining);
+            int allocation = searchPolicy.attemptBudget(mode, remaining, checkpoint.isHighValue());
             attempt.setBudgetAllocated(allocation);
             attempt.setStatus("RUNNING");
+            AgentRunService.SearchNode searchNode = findNode(checkpoint, strategy.getId());
+            if (searchNode != null) {
+                attempt.setSearchNodeId(searchNode.getId());
+                attempt.setSearchScore(searchNode.getScore());
+                searchNode.setStatus("RUNNING");
+                checkpoint.getSearch().setBranchesExpanded(checkpoint.getSearch().getBranchesExpanded() + 1);
+                events.accept(new AgentEvent("branch_select", "选择路线 " + strategy.getTitle(),
+                        "score=" + searchNode.getScore()));
+            }
             AgentTaskContext.set(session.getId(), run.getId(), attempt.getId());
             String attemptTask = attemptPrompt(question, strategy, checkpoint);
             String answer;
@@ -235,6 +277,8 @@ public class AgentOrchestrator {
                 attempt.setStatus("SUCCESS");
                 attempt.setEndedAt(java.time.Instant.now().toString());
                 strategy.setStatus("SUCCESS");
+                AgentRunService.SearchNode successNode = findNode(checkpoint, strategy.getId());
+                if (successNode != null) successNode.setStatus("SUCCESS");
                 checkpoint.setBestAnswer(answer);
                 checkpoint.setBestAttemptId(attempt.getId());
                 checkpoint.setStrategyIndex(index + 1);
@@ -297,6 +341,8 @@ public class AgentOrchestrator {
         String reflection = failures.reflect(run.getQuestion(), attempt, failureType, reason);
         attempt.setReflection(reflection);
         strategy.setStatus("FAILED");
+        AgentRunService.SearchNode failedNode = findNode(checkpoint, strategy.getId());
+        if (failedNode != null) failedNode.setStatus("FAILED");
         runs.checkpoint(run);
         runs.addStep(run, "ATTEMPT", "路线失败", attempt.getStrategyTitle() + "：" + reason, false);
         events.accept(new AgentEvent("attempt_failed", "路线 " + attempt.getStrategyTitle() + " 失败",
@@ -337,6 +383,7 @@ public class AgentOrchestrator {
                 artifacts.json(produced)));
         memory.append(session.getId(), "assistant", answer, "MEDIUM", "answer");
         runs.finish(run, answer, "DONE", validation);
+        metrics.record(run);
         events.accept(new AgentEvent("answer", answer, validation));
         events.accept(new AgentEvent("done", "完成", run.getId()));
         return new Result(session.getId(), run.getId(), mode, answer, validation);
@@ -362,6 +409,7 @@ public class AgentOrchestrator {
                 artifacts.json(produced)));
         memory.append(session.getId(), "assistant", answer, "MEDIUM", "answer");
         runs.finish(run, answer, "DONE", reason);
+        metrics.record(run);
         events.accept(new AgentEvent("validation", "多路线尝试结束", reason));
         events.accept(new AgentEvent("answer", answer, reason));
         events.accept(new AgentEvent("done", "完成（部分）", run.getId()));
@@ -471,6 +519,22 @@ public class AgentOrchestrator {
         for (AgentRunService.Strategy strategy : strategies) {
             sb.append(strategy.getId()).append(". ").append(strategy.getTitle())
                     .append("：").append(strategy.getApproach()).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private AgentRunService.SearchNode findNode(AgentRunService.Checkpoint checkpoint, String strategyId) {
+        if (checkpoint.getSearch() == null || checkpoint.getSearch().getNodes() == null) return null;
+        for (AgentRunService.SearchNode node : checkpoint.getSearch().getNodes()) {
+            if (strategyId.equals(node.getStrategyId())) return node;
+        }
+        return null;
+    }
+
+    private String scoreText(List<AgentRunService.SearchNode> nodes) {
+        StringBuilder sb = new StringBuilder();
+        for (AgentRunService.SearchNode node : nodes) {
+            sb.append(node.getTitle()).append("：").append(node.getScore()).append("\n");
         }
         return sb.toString();
     }

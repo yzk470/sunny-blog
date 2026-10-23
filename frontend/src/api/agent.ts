@@ -81,6 +81,21 @@ export interface AgentTaskView {
   events: AgentTaskEvent[]
 }
 
+export interface AgentMetrics {
+  tasks: number
+  successes: number
+  failures: number
+  successRate: number
+  attempts: number
+  failedAttempts: number
+  retryRate: number
+  steps: number
+  averageSteps: number
+  highValueTasks: number
+  highValueSuccesses: number
+  branchesExpanded: number
+}
+
 export interface AgentStreamHandlers {
   onEvent?: (type: string, message: string, detail: string, seq?: number) => void
   onDone?: () => void
@@ -206,6 +221,9 @@ export const agentApi = {
   },
   runs() {
     return httpGet<AgentRun[]>('/admin/agent/runs')
+  },
+  metrics() {
+    return httpGet<AgentMetrics>('/admin/agent/metrics')
   },
   run(id: string) {
     return httpGet<AgentRun>(`/admin/agent/runs/${encodeURIComponent(id)}`)

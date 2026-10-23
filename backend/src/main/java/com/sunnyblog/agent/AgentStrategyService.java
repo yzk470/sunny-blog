@@ -23,19 +23,24 @@ public class AgentStrategyService {
     }
 
     public StrategyPlan plan(String task, String memoryContext, String mode) {
+        return plan(task, memoryContext, mode, 3);
+    }
+
+    public StrategyPlan plan(String task, String memoryContext, String mode, int maxStrategies) {
         int budget = (mode != null && "plan".equals(mode)) || task.length() > 120 ? 60 : 36;
+        int count = Math.max(2, Math.min(5, maxStrategies));
         List<AgentRunService.Strategy> strategies = new ArrayList<>();
         if (llm.isConfigured()) {
             String system = """
                     你是 Agent 策略规划器。失败是常态，不要假设第一条路线一定成功。
-                    为一个任务设计 2～3 条真正不同、可执行的候选路线，按成功概率排序。
+                    为一个任务设计 %d 条真正不同、可执行的候选路线，按成功概率排序。
                     每条路线说明：方法、主要风险、失败后的备选手段。
                     路线之间不能只是换个文件名或重复同一动作。
                     只输出 JSON：
                     {"successCriteria":"怎样才算真正完成","strategies":[
                       {"title":"路线名","approach":"具体做法","risk":"最大风险","fallback":"失败后怎么换"}
                     ]}
-                    """;
+                    """.formatted(count);
             String user = "历史记忆：\n" + memoryContext + "\n\n任务：\n" + task;
             try {
                 JsonNode json = llm.completeJson(system, user, 60);
@@ -52,7 +57,7 @@ public class AgentStrategyService {
                         strategy.setRisk(node.path("risk").asText(""));
                         strategy.setFallback(node.path("fallback").asText(""));
                         strategies.add(strategy);
-                        if (strategies.size() >= 3) break;
+                        if (strategies.size() >= count) break;
                     }
                 }
                 String criteria = json.path("successCriteria").asText("");

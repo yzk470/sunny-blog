@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { agentApi, type AgentRun, type AgentRunStep } from '@/api/agent'
+import { agentApi, type AgentMetrics, type AgentRun, type AgentRunStep } from '@/api/agent'
 import { useToastStore } from '@/stores/toast'
 
 const toast = useToastStore()
 const runs = ref<AgentRun[]>([])
+const metrics = ref<AgentMetrics | null>(null)
 const selected = ref<AgentRun | null>(null)
 const loading = ref(true)
 const loadingDetail = ref(false)
@@ -21,7 +22,9 @@ const filtered = computed(() => {
 async function load() {
   loading.value = true
   try {
-    runs.value = await agentApi.runs()
+    const [list, stats] = await Promise.all([agentApi.runs(), agentApi.metrics()])
+    runs.value = list
+    metrics.value = stats
     if (!selected.value && runs.value.length) await open(runs.value[0])
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '加载执行记录失败', 'error')
@@ -76,6 +79,17 @@ onMounted(load)
         <p>查看每次任务的模式、计划、工具调用、错误和独立验收结果。</p>
       </div>
       <button type="button" class="btn btn-ghost" :disabled="loading" @click="load">刷新</button>
+    </div>
+
+    <div v-if="metrics" class="trace-metrics">
+      <div><span>任务总数</span><strong>{{ metrics.tasks }}</strong></div>
+      <div><span>成功率</span><strong>{{ (metrics.successRate * 100).toFixed(1) }}%</strong></div>
+      <div><span>重试率</span><strong>{{ (metrics.retryRate * 100).toFixed(1) }}%</strong></div>
+      <div><span>平均预算</span><strong>{{ metrics.averageSteps.toFixed(1) }}</strong></div>
+      <div><span>尝试次数</span><strong>{{ metrics.attempts }}</strong></div>
+      <div><span>高价值任务</span><strong>{{ metrics.highValueTasks }}</strong></div>
+      <div><span>分支展开</span><strong>{{ metrics.branchesExpanded }}</strong></div>
+      <div><span>成本单位</span><strong>{{ metrics.steps }}</strong></div>
     </div>
 
     <div class="trace-layout">
@@ -143,6 +157,11 @@ onMounted(load)
 
 <style scoped>
 .admin-agent-runs { padding-bottom: 40px; }
+.trace-metrics { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+.trace-metrics div { display: flex; flex-direction: column; gap: 4px; padding: 10px 11px; border: 1px solid rgba(98, 119, 139, 0.12); border-radius: 11px; background: #fff; }
+.trace-metrics span { color: #94a0aa; font-size: 9px; }
+.trace-metrics strong { color: #3d566b; font-size: 16px; }
+@media (max-width: 1100px) { .trace-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .trace-layout { display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: start; }
 .admin-panel { border: 1px solid rgba(98, 119, 139, 0.13); border-radius: 16px; background: #fff; padding: 16px; }
 .admin-empty { color: #8e9aa5; font-size: 13px; padding: 16px 4px; }

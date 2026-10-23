@@ -114,9 +114,30 @@ public class AgentRunService {
         private int successfulTools;
         private int failedTools;
         private String executionEvidence = "";
+        private String searchNodeId;
+        private int searchScore;
         private String startedAt;
         private String endedAt;
         private List<String> artifacts = new ArrayList<>();
+    }
+
+    @Data
+    public static class SearchNode {
+        private String id;
+        private String strategyId;
+        private String title;
+        private int score;
+        private String status = "PENDING";
+    }
+
+    @Data
+    public static class SearchState {
+        private boolean enabled;
+        private String mode = "LINEAR";
+        private int sampleCount;
+        private int maxBranches = 3;
+        private int branchesExpanded;
+        private List<SearchNode> nodes = new ArrayList<>();
     }
 
     @Data
@@ -124,6 +145,8 @@ public class AgentRunService {
         private String phase = "react";
         private ReActState react = new ReActState();
         private PlanState plan = new PlanState();
+        private SearchState search = new SearchState();
+        private boolean highValue;
         private int taskBudget = 48;
         private int taskSpent;
         private List<Strategy> strategies = new ArrayList<>();
