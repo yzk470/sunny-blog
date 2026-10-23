@@ -86,6 +86,29 @@ public class AgentAdminController {
         return ApiResponse.ok(metrics.snapshot());
     }
 
+    @GetMapping("/metrics/summary")
+    public ApiResponse<AgentMetricsService.Snapshot> metricsSummary(@RequestParam(defaultValue = "30") int days) {
+        return ApiResponse.ok(metrics.summary(days));
+    }
+
+    @GetMapping("/metrics/trend")
+    public ApiResponse<List<AgentMetricsRepository.DailyRow>> metricsTrend(
+            @RequestParam(defaultValue = "30") int days) {
+        return ApiResponse.ok(metrics.trend(days));
+    }
+
+    @GetMapping("/metrics/failures")
+    public ApiResponse<List<java.util.Map<String, Object>>> metricsFailures(
+            @RequestParam(defaultValue = "30") int days) {
+        return ApiResponse.ok(metrics.failures(days));
+    }
+
+    @GetMapping("/metrics/tasks")
+    public ApiResponse<List<AgentMetricsRepository.TaskRow>> metricsTasks(
+            @RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.ok(metrics.recentTasks(limit));
+    }
+
     @GetMapping("/artifacts")
     public ApiResponse<List<AgentArtifactService.Artifact>> artifacts() {
         return ApiResponse.ok(artifacts.list());

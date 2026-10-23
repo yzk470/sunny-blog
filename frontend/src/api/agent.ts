@@ -96,6 +96,39 @@ export interface AgentMetrics {
   branchesExpanded: number
 }
 
+export interface AgentTrendRow {
+  day: string
+  tasks: number
+  successes: number
+  attempts: number
+  failedAttempts: number
+  steps: number
+  highValueTasks: number
+  highValueSuccesses: number
+  branches: number
+}
+
+export interface AgentFailureRow {
+  failure_type: string
+  count: number
+}
+
+export interface AgentMetricTask {
+  runId: string
+  sessionId: string
+  mode: string
+  highValue: boolean
+  status: string
+  taskBudget: number
+  taskSpent: number
+  attemptCount: number
+  failedAttemptCount: number
+  branchExpanded: number
+  success: boolean
+  durationMs: number
+  createdAt: string
+}
+
 export interface AgentStreamHandlers {
   onEvent?: (type: string, message: string, detail: string, seq?: number) => void
   onDone?: () => void
@@ -224,6 +257,18 @@ export const agentApi = {
   },
   metrics() {
     return httpGet<AgentMetrics>('/admin/agent/metrics')
+  },
+  metricsSummary(days = 30) {
+    return httpGet<AgentMetrics>(`/admin/agent/metrics/summary?days=${days}`)
+  },
+  metricsTrend(days = 30) {
+    return httpGet<AgentTrendRow[]>(`/admin/agent/metrics/trend?days=${days}`)
+  },
+  metricsFailures(days = 30) {
+    return httpGet<AgentFailureRow[]>(`/admin/agent/metrics/failures?days=${days}`)
+  },
+  metricsTasks(limit = 20) {
+    return httpGet<AgentMetricTask[]>(`/admin/agent/metrics/tasks?limit=${limit}`)
   },
   run(id: string) {
     return httpGet<AgentRun>(`/admin/agent/runs/${encodeURIComponent(id)}`)

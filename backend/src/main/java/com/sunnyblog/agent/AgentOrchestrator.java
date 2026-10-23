@@ -125,6 +125,9 @@ public class AgentOrchestrator {
             checkpoint = new AgentRunService.Checkpoint();
             run.setCheckpoint(checkpoint);
         }
+        if (checkpoint.getSearch() == null) checkpoint.setSearch(new AgentRunService.SearchState());
+        if (checkpoint.getStrategies() == null) checkpoint.setStrategies(new ArrayList<>());
+        if (checkpoint.getAttempts() == null) checkpoint.setAttempts(new ArrayList<>());
         if (checkpoint.getStrategies().isEmpty()) {
             AgentPreflightService.Preflight check = preflight.check(question);
             runs.addStep(run, "PREFLIGHT", check.summary(), String.join("\n", check.warnings()), check.ok());
@@ -204,7 +207,12 @@ public class AgentOrchestrator {
             }
         }
 
-        while (index < checkpoint.getStrategies().size()) {
+        while (true) {
+            if (checkpoint.isHighValue() && attempt == null) {
+                index = selectNextIndex(checkpoint);
+                if (index < 0) break;
+            }
+            if (index < 0 || index >= checkpoint.getStrategies().size()) break;
             if (isCancelled(run)) return pauseAttempt(session, run, mode, attempt, events);
             AgentRunService.Strategy strategy = checkpoint.getStrategies().get(index);
             if (attempt == null || !strategy.getId().equals(attempt.getStrategyId())) {
@@ -252,9 +260,14 @@ public class AgentOrchestrator {
                 log.warn("Attempt {} failed: {}", attempt.getId(), ex.getMessage(), ex);
                 failAttempt(session, run, checkpoint, attempt, strategy, checkpoint.getReact().getTools(),
                         "TOOL", ex.getMessage(), events);
-                index++;
-                checkpoint.setStrategyIndex(index);
                 attempt = null;
+                if (checkpoint.isHighValue()) {
+                    index = selectNextIndex(checkpoint);
+                    if (index < 0) break;
+                } else {
+                    index++;
+                }
+                checkpoint.setStrategyIndex(Math.max(0, index));
                 continue;
             }
 
@@ -291,9 +304,14 @@ public class AgentOrchestrator {
 
             failAttempt(session, run, checkpoint, attempt, strategy, checkpoint.getReact().getTools(),
                     verdict.failureType(), verdict.reason(), events);
-            index++;
-            checkpoint.setStrategyIndex(index);
             attempt = null;
+            if (checkpoint.isHighValue()) {
+                index = selectNextIndex(checkpoint);
+                if (index < 0) break;
+            } else {
+                index++;
+            }
+            checkpoint.setStrategyIndex(Math.max(0, index));
         }
 
         return finishBestEffort(session, run, mode, checkpoint, events);
@@ -338,19 +356,102 @@ public class AgentOrchestrator {
         attempt.setSuccessfulTools(countTools(checkpoint, true));
         attempt.setFailedTools(countTools(checkpoint, false));
         attempt.setExecutionEvidence(executionEvidence(checkpoint));
-        String reflection = failures.reflect(run.getQuestion(), attempt, failureType, reason);
-        attempt.setReflection(reflection);
+        AgentFailureService.Reflection reflection = failures.reflectStructured(
+                run.getQuestion(), attempt, failureType, reason, strategy);
+        attempt.setReflection(reflection.summary());
+        attempt.setFailedAssumption(reflection.failedAssumption());
+        attempt.setFailureEvidence(reflection.evidence());
+        attempt.setGlobalConstraint(reflection.globalConstraint());
+        attempt.setForbiddenActions(reflection.forbiddenActions());
+        attempt.setRequiredPreconditions(reflection.requiredPreconditions());
+        attempt.setInvalidatesStrategyIds(reflection.invalidatesStrategyIds());
+        attempt.setRepairOperators(reflection.repairOperators());
         strategy.setStatus("FAILED");
         AgentRunService.SearchNode failedNode = findNode(checkpoint, strategy.getId());
-        if (failedNode != null) failedNode.setStatus("FAILED");
+        if (failedNode != null) {
+            failedNode.setStatus("FAILED");
+            failedNode.setFailureType(failureType);
+            failedNode.setReflection(reflection.summary());
+        }
+        if (checkpoint.isHighValue()) {
+            applyReflection(run, checkpoint, strategy, failedNode, reflection, events);
+        }
         runs.checkpoint(run);
         runs.addStep(run, "ATTEMPT", "路线失败", attempt.getStrategyTitle() + "：" + reason, false);
         events.accept(new AgentEvent("attempt_failed", "路线 " + attempt.getStrategyTitle() + " 失败",
                 failureType + "：" + reason));
-        events.accept(new AgentEvent("reflection", "下次尝试的教训", reflection));
+        events.accept(new AgentEvent("reflection", "下次尝试的结构化教训",
+                reflection.summary() + "\n约束：" + reflection.globalConstraint()));
         checkpoint.setReact(new AgentRunService.ReActState());
         checkpoint.setPlan(new AgentRunService.PlanState());
         runs.checkpoint(run);
+    }
+
+    private void applyReflection(AgentRunService.AgentRun run, AgentRunService.Checkpoint checkpoint,
+                                 AgentRunService.Strategy failedStrategy,
+                                 AgentRunService.SearchNode failedNode,
+                                 AgentFailureService.Reflection reflection,
+                                 Consumer<AgentEvent> events) {
+        if (reflection.globalConstraint() != null && !reflection.globalConstraint().isBlank()
+                && !checkpoint.getSearch().getGlobalConstraints().contains(reflection.globalConstraint())) {
+            checkpoint.getSearch().getGlobalConstraints().add(reflection.globalConstraint());
+        }
+        int pruned = 0;
+        for (AgentRunService.SearchNode node : checkpoint.getSearch().getNodes()) {
+            if (!"PENDING".equals(node.getStatus())) continue;
+            if (reflection.invalidatesStrategyIds() != null
+                    && reflection.invalidatesStrategyIds().contains(node.getStrategyId())) {
+                node.setStatus("PRUNED");
+                for (AgentRunService.Strategy strategy : checkpoint.getStrategies()) {
+                    if (strategy.getId().equals(node.getStrategyId())) strategy.setStatus("PRUNED");
+                }
+                pruned++;
+            }
+        }
+        int parentDepth = failedNode == null ? 0 : failedNode.getDepth();
+        boolean canExpand = parentDepth < checkpoint.getSearch().getMaxDepth()
+                && checkpoint.getSearch().getNodes().size() < checkpoint.getSearch().getMaxNodes();
+        if (canExpand) {
+            List<AgentRunService.Strategy> children = search.expand(run.getQuestion(), failedStrategy,
+                    reflection, checkpoint.getStrategies().size(), 2);
+            for (AgentRunService.Strategy child : children) {
+                if (checkpoint.getSearch().getNodes().size() >= checkpoint.getSearch().getMaxNodes()) break;
+                checkpoint.getStrategies().add(child);
+                AgentRunService.SearchNode node = new AgentRunService.SearchNode();
+                node.setId("node-" + child.getId());
+                node.setStrategyId(child.getId());
+                node.setParentId(failedNode == null ? null : failedNode.getId());
+                node.setTitle(child.getTitle());
+                node.setScore(60);
+                node.setDepth(parentDepth + 1);
+                node.setStatus("PENDING");
+                checkpoint.getSearch().getNodes().add(node);
+                if (failedNode != null) failedNode.getChildren().add(node.getId());
+            }
+            if (!children.isEmpty()) {
+                events.accept(new AgentEvent("branch_expand",
+                        "反思生成了 " + children.size() + " 个修复分支",
+                        children.stream().map(AgentRunService.Strategy::getTitle).toList().toString()));
+            }
+        }
+        List<AgentRunService.Strategy> pending = checkpoint.getStrategies().stream()
+                .filter(s -> "PENDING".equals(s.getStatus())).toList();
+        if (!pending.isEmpty()) {
+            List<AgentSearchService.Scored> rescored = search.rescore(run.getQuestion(), pending, reflection);
+            for (AgentSearchService.Scored item : rescored) {
+                AgentRunService.SearchNode node = findNode(checkpoint, item.strategy().getId());
+                if (node != null && "PENDING".equals(node.getStatus())) {
+                    node.setScore(item.score());
+                }
+            }
+            events.accept(new AgentEvent("branch_rescore", "基于失败反思重新评分",
+                    rescored.stream().map(s -> s.strategy().getTitle() + "：" + s.score())
+                            .toList().toString()));
+        }
+        if (pruned > 0) {
+            events.accept(new AgentEvent("branch_pruned", "剪掉了 " + pruned + " 条被失败反思否定的路线",
+                    reflection.summary()));
+        }
     }
 
     private Result pauseAttempt(AgentMemoryService.Session session, AgentRunService.AgentRun run,
@@ -422,7 +523,19 @@ public class AgentOrchestrator {
         for (AgentRunService.AttemptRecord prior : checkpoint.getAttempts()) {
             if ("FAILED".equals(prior.getStatus()) && prior.getReflection() != null) {
                 previous.append("- ").append(prior.getStrategyTitle()).append("：")
-                        .append(prior.getReflection()).append("\n");
+                        .append(prior.getReflection());
+                if (prior.getForbiddenActions() != null && !prior.getForbiddenActions().isEmpty()) {
+                    previous.append("；禁止：").append(String.join("、", prior.getForbiddenActions()));
+                }
+                if (prior.getRequiredPreconditions() != null && !prior.getRequiredPreconditions().isEmpty()) {
+                    previous.append("；前置：").append(String.join("、", prior.getRequiredPreconditions()));
+                }
+                previous.append("\n");
+            }
+        }
+        if (checkpoint.getSearch().getGlobalConstraints() != null) {
+            for (String constraint : checkpoint.getSearch().getGlobalConstraints()) {
+                previous.append("- 全局约束：").append(constraint).append("\n");
             }
         }
         return """
@@ -529,6 +642,24 @@ public class AgentOrchestrator {
             if (strategyId.equals(node.getStrategyId())) return node;
         }
         return null;
+    }
+
+    private int selectNextIndex(AgentRunService.Checkpoint checkpoint) {
+        AgentRunService.SearchNode best = null;
+        for (AgentRunService.SearchNode node : checkpoint.getSearch().getNodes()) {
+            if (!"PENDING".equals(node.getStatus())) continue;
+            if (best == null || node.getScore() > best.getScore()) best = node;
+        }
+        if (best == null) return -1;
+        int bestIndex = -1;
+        for (int i = 0; i < checkpoint.getStrategies().size(); i++) {
+            AgentRunService.Strategy strategy = checkpoint.getStrategies().get(i);
+            if (strategy.getId().equals(best.getStrategyId()) && "PENDING".equals(strategy.getStatus())) {
+                bestIndex = i;
+                break;
+            }
+        }
+        return bestIndex;
     }
 
     private String scoreText(List<AgentRunService.SearchNode> nodes) {

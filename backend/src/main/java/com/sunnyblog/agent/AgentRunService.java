@@ -108,6 +108,13 @@ public class AgentRunService {
         private String failureType;
         private String failureReason;
         private String reflection;
+        private String failedAssumption;
+        private String failureEvidence;
+        private String globalConstraint;
+        private List<String> forbiddenActions = new ArrayList<>();
+        private List<String> requiredPreconditions = new ArrayList<>();
+        private List<String> invalidatesStrategyIds = new ArrayList<>();
+        private List<String> repairOperators = new ArrayList<>();
         private String answer;
         private int budgetAllocated;
         private int budgetSpent;
@@ -125,9 +132,14 @@ public class AgentRunService {
     public static class SearchNode {
         private String id;
         private String strategyId;
+        private String parentId;
         private String title;
         private int score;
+        private int depth;
         private String status = "PENDING";
+        private String failureType;
+        private String reflection;
+        private List<String> children = new ArrayList<>();
     }
 
     @Data
@@ -136,7 +148,10 @@ public class AgentRunService {
         private String mode = "LINEAR";
         private int sampleCount;
         private int maxBranches = 3;
+        private int maxNodes = 6;
+        private int maxDepth = 2;
         private int branchesExpanded;
+        private List<String> globalConstraints = new ArrayList<>();
         private List<SearchNode> nodes = new ArrayList<>();
     }
 

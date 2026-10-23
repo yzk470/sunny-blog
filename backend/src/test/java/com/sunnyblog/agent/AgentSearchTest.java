@@ -79,7 +79,10 @@ class AgentSearchTest {
         checkpoint.getAttempts().add(success);
         run.setCheckpoint(checkpoint);
 
-        AgentMetricsService metrics = new AgentMetricsService();
+        AgentMetricsRepository repository = mock(AgentMetricsRepository.class);
+        when(repository.summary(anyInt())).thenReturn(
+                new AgentMetricsRepository.Summary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
+        AgentMetricsService metrics = new AgentMetricsService(repository);
         metrics.record(run);
         AgentMetricsService.Snapshot snapshot = metrics.snapshot();
         assertEquals(1, snapshot.tasks());

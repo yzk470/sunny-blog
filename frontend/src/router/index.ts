@@ -135,6 +135,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Agent 执行链路', requiresAuth: true },
       },
       {
+        path: 'agent-metrics',
+        name: 'admin-agent-metrics',
+        component: () => import('@/views/admin/AgentMetricsView.vue'),
+        meta: { title: 'Agent 执行统计', requiresAuth: true },
+      },
+      {
         path: 'agent-artifacts',
         name: 'admin-agent-artifacts',
         component: () => import('@/views/admin/AgentArtifactsView.vue'),
