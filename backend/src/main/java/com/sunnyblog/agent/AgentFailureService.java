@@ -22,7 +22,8 @@ public class AgentFailureService {
         String text = (answer == null ? "" : answer) + "\n" + (failureOutput == null ? "" : failureOutput);
         String lower = text.toLowerCase(Locale.ROOT);
         if (lower.contains("policy_denied") || lower.contains("非法路径")
-                || lower.contains("outside allowed") || lower.contains("越权")) {
+                || lower.contains("outside allowed") || lower.contains("越权")
+                || lower.contains("read-only file system") || lower.contains("只读文件系统")) {
             return "POLICY";
         }
         if (lower.contains("module not found") || lower.contains("modulenotfounderror")
