@@ -162,6 +162,7 @@ public class AgentRunService {
         private PlanState plan = new PlanState();
         private SearchState search = new SearchState();
         private boolean highValue;
+        private String benchmarkVariant = "dynamic";
         private int taskBudget = 48;
         private int taskSpent;
         private List<Strategy> strategies = new ArrayList<>();

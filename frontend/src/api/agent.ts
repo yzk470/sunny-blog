@@ -78,6 +78,10 @@ export interface AgentTaskView {
   validation: string | null
   lastEventSeq: number
   active: boolean
+  attemptCount: number
+  taskBudget: number
+  taskSpent: number
+  highValue: boolean
   events: AgentTaskEvent[]
 }
 

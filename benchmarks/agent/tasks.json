@@ -1,0 +1,38 @@
+[
+  {
+    "id": "simple-answer",
+    "message": "请用一句话回答：2+2 等于多少？",
+    "mode": "react",
+    "checks": { "contains": ["4"] }
+  },
+  {
+    "id": "script-run",
+    "message": "写一个 Python 脚本计算 2+2 并运行，告诉我结果。",
+    "mode": "react",
+    "checks": { "contains": ["4"], "execution": true }
+  },
+  {
+    "id": "artifact-text",
+    "message": "用 write_file 在 artifacts 下创建 benchmark.txt，内容写 BENCH_OK，然后 final 告诉我路径。",
+    "mode": "react",
+    "checks": { "contains": ["BENCH_OK"], "artifactExt": ["txt"] }
+  },
+  {
+    "id": "artifact-html",
+    "message": "生成一个简单的 HTML 文件 artifacts/bench.html，包含标题 Benchmark，然后 final 说明路径。",
+    "mode": "react",
+    "checks": { "contains": ["Benchmark"], "artifactExt": ["html", "htm"] }
+  },
+  {
+    "id": "plan-three-points",
+    "message": "先写一句介绍，再列出三个要点。不要生成文件。",
+    "mode": "plan",
+    "checks": { "contains": ["要点"], "maxSeconds": 240 }
+  },
+  {
+    "id": "high-value-design",
+    "message": "请做一次完整的系统设计说明：给个人博客设计一个缓存方案，用两点说明即可。",
+    "mode": "plan",
+    "checks": { "contains": ["缓存"], "maxSeconds": 360 }
+  }
+]

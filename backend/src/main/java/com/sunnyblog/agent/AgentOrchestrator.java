@@ -36,7 +36,7 @@ public class AgentOrchestrator {
     }
 
     public Result chat(String sessionId, String clientTaskId, String question, String requestedMode,
-                       List<String> knowledgeBaseIds, Consumer<AgentEvent> events) {
+                       List<String> knowledgeBaseIds, String benchmarkVariant, Consumer<AgentEvent> events) {
         if (!llm.isConfigured()) {
             throw new IllegalStateException("Agent 模型未配置，请设置 DEEPSEEK_API_KEY");
         }
@@ -56,6 +56,8 @@ public class AgentOrchestrator {
             run.setKnowledgeBaseIds(knowledgeBaseIds == null ? List.of() : List.copyOf(knowledgeBaseIds));
             if (run.getCheckpoint() == null) run.setCheckpoint(new AgentRunService.Checkpoint());
             if (run.getStatus() == null) run.setStatus("RUNNING");
+            run.getCheckpoint().setBenchmarkVariant(
+                    benchmarkVariant == null || benchmarkVariant.isBlank() ? "dynamic" : benchmarkVariant);
             runs.checkpoint(run);
 
             if ("DONE".equals(run.getStatus())) {
@@ -141,9 +143,24 @@ public class AgentOrchestrator {
                 events.accept(new AgentEvent("done", "预检失败", run.getId()));
                 return new Result(session.getId(), run.getId(), mode, failed, failed);
             }
-            AgentSearchPolicy.Decision decision = searchPolicy.decide(question, mode);
+            AgentSearchPolicy.Decision decision;
+            String variant = checkpoint.getBenchmarkVariant() == null ? "dynamic" : checkpoint.getBenchmarkVariant();
+            if ("linear".equalsIgnoreCase(variant)) {
+                decision = new AgentSearchPolicy.Decision(false, 1, 1,
+                        16, "benchmark linear baseline");
+            } else if ("static".equalsIgnoreCase(variant)) {
+                decision = new AgentSearchPolicy.Decision(false, 3, 3,
+                        "plan".equals(mode) ? 60 : 36, "benchmark static baseline");
+            } else {
+                decision = searchPolicy.decide(question, mode);
+            }
             AgentStrategyService.StrategyPlan plan = strategies.plan(question, memoryContext, mode,
-                    decision.sampleCount());            checkpoint.setSuccessCriteria(plan.successCriteria());
+                    decision.sampleCount());
+            if ("linear".equalsIgnoreCase(variant) && plan.strategies().size() > 1) {
+                plan = new AgentStrategyService.StrategyPlan(plan.successCriteria(),
+                        new ArrayList<>(plan.strategies().subList(0, 1)), decision.taskBudget());
+            }
+            checkpoint.setSuccessCriteria(plan.successCriteria());
             checkpoint.setStrategies(plan.strategies());
             checkpoint.setTaskBudget(decision.taskBudget());
             checkpoint.setHighValue(decision.highValue());

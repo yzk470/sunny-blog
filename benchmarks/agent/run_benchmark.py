@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""Run the Moonlight Agent benchmark against the public API.
+
+Usage:
+  python benchmarks/agent/run_benchmark.py
+  python benchmarks/agent/run_benchmark.py --variants linear,static,dynamic --repeats 1
+  BENCHMARK_BASE_URL=http://127.0.0.1:8090 python benchmarks/agent/run_benchmark.py
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import statistics
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+import requests
+
+ROOT = Path(__file__).resolve().parent
+DEFAULT_BASE = os.environ.get("BENCHMARK_BASE_URL", "https://www.bluish-white.top")
+
+
+def parse_sse(response: requests.Response, deadline: float) -> tuple[list[dict[str, Any]], str]:
+    events: list[dict[str, Any]] = []
+    task_id = ""
+    buffer = ""
+    for chunk in response.iter_content(chunk_size=2048):
+        if time.time() > deadline:
+            break
+        if not chunk:
+            continue
+        buffer += chunk.decode("utf-8", errors="replace").replace("\r\n", "\n")
+        while "\n\n" in buffer:
+            block, buffer = buffer.split("\n\n", 1)
+            event = "message"
+            seq = 0
+            data = ""
+            for line in block.split("\n"):
+                if line.startswith("event:"):
+                    event = line[6:].strip()
+                elif line.startswith("id:"):
+                    try:
+                        seq = int(line[3:].strip())
+                    except ValueError:
+                        seq = 0
+                elif line.startswith("data:"):
+                    data += line[5:].strip()
+            if not data:
+                continue
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                payload = {"message": data, "detail": ""}
+            item = {"type": event, "seq": seq, "message": payload.get("message", ""),
+                    "detail": payload.get("detail", "")}
+            events.append(item)
+            if event == "session" and payload.get("detail"):
+                task_id = payload["detail"]
+            if event == "done":
+                return events, task_id
+    return events, task_id
+
+
+def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dict[str, Any]:
+    tag = f"bench-{variant}-{task['id']}-{int(time.time())}-{uuid.uuid4().hex[:6]}"
+    payload = {
+        "sessionId": tag,
+        "clientTaskId": tag,
+        "message": task["message"],
+        "mode": task["mode"],
+        "knowledgeBaseIds": [],
+        "benchmarkVariant": variant,
+    }
+    started = time.time()
+    events: list[dict[str, Any]] = []
+    task_id = ""
+    http_ok = False
+    error = ""
+    try:
+        response = requests.post(
+            base + "/api/agent/chat/stream",
+            json=payload,
+            headers={"Accept": "text/event-stream"},
+            stream=True,
+            timeout=(20, timeout),
+        )
+        http_ok = response.ok
+        if response.ok:
+            events, task_id = parse_sse(response, started + timeout)
+            response.close()
+        else:
+            error = f"HTTP {response.status_code}"
+    except Exception as exc:
+        error = str(exc)
+    duration = round(time.time() - started, 3)
+
+    view: dict[str, Any] = {}
+    if task_id:
+        try:
+            view = requests.get(base + f"/api/agent/tasks/{task_id}", timeout=20).json().get("data", {})
+        except Exception:
+            view = {}
+
+    answer = str(view.get("answer") or "")
+    artifact_paths: list[str] = []
+    execution_ok = False
+    attempt_failed = False
+    attempt_success = False
+    failure_types: list[str] = []
+    for event in events:
+        if event["type"] == "answer" and not answer:
+            answer = event["message"]
+        if event["type"] == "artifacts":
+            try:
+                artifact_paths = [a.get("path", "") for a in json.loads(event["detail"] or "[]")]
+            except (json.JSONDecodeError, TypeError):
+                artifact_paths = []
+        if event["type"] == "tool_end":
+            text = event["message"]
+            if ("run_script" in text or "run_command" in text) and "失败" not in text:
+                execution_ok = True
+        if event["type"] == "attempt_failed":
+            attempt_failed = True
+            prefix = event["detail"].split("：", 1)[0].strip()
+            if prefix:
+                failure_types.append(prefix)
+        if event["type"] == "attempt_success":
+            attempt_success = True
+
+    checks = task.get("checks", {})
+    failures: list[str] = []
+    if not http_ok:
+        failures.append(error or "request failed")
+    if view.get("status") != "DONE":
+        failures.append(f"status={view.get('status')}")
+    for needle in checks.get("contains", []):
+        if needle not in answer:
+            failures.append(f"missing:{needle}")
+    for ext in checks.get("artifactExt", []):
+        if not any(path.lower().endswith("." + ext.lower()) for path in artifact_paths):
+            failures.append(f"artifact:.{ext}")
+    if checks.get("execution") and not execution_ok:
+        failures.append("execution-not-confirmed")
+    if checks.get("maxSeconds") and duration > checks["maxSeconds"]:
+        failures.append(f"timeout>{checks['maxSeconds']}s")
+
+    return {
+        "task": task["id"],
+        "variant": variant,
+        "success": not failures,
+        "failures": failures,
+        "duration": duration,
+        "answer": answer[:500],
+        "taskId": task_id,
+        "status": view.get("status"),
+        "attemptCount": view.get("attemptCount", 0),
+        "taskBudget": view.get("taskBudget", 0),
+        "taskSpent": view.get("taskSpent", 0),
+        "highValue": view.get("highValue", False),
+        "artifacts": artifact_paths,
+        "attemptFailed": attempt_failed,
+        "attemptSuccess": attempt_success,
+        "failureTypes": failure_types,
+    }
+
+
+def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(rows)
+    successes = sum(1 for r in rows if r["success"])
+    failed = [r for r in rows if not r["success"]]
+    recovered = [r for r in rows if r["attemptFailed"] and r["success"]]
+    durations = [r["duration"] for r in rows]
+    budgets = [r["taskSpent"] for r in rows]
+    attempts = [r["attemptCount"] for r in rows]
+    p95 = sorted(durations)[max(0, int(len(durations) * 0.95) - 1)] if durations else 0
+    return {
+        "tasks": total,
+        "successes": successes,
+        "successRate": round(successes / total, 4) if total else 0,
+        "firstAttemptSuccess": sum(1 for r in rows if r["success"] and not r["attemptFailed"]),
+        "recovered": len(recovered),
+        "recoveryRate": round(len(recovered) / max(1, sum(1 for r in rows if r["attemptFailed"])), 4),
+        "avgAttempts": round(statistics.mean(attempts), 2) if attempts else 0,
+        "avgBudget": round(statistics.mean(budgets), 2) if budgets else 0,
+        "costPerSuccess": round(sum(budgets) / max(1, successes), 2),
+        "p95Seconds": p95,
+        "failureTypes": sorted({f for r in failed for f in r["failureTypes"]}),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base", default=DEFAULT_BASE)
+    parser.add_argument("--tasks", default=str(ROOT / "tasks.json"))
+    parser.add_argument("--variants", default="linear,static,dynamic")
+    parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument("--timeout", type=int, default=360)
+    parser.add_argument("--report-dir", default=str(ROOT / "reports"))
+    args = parser.parse_args()
+
+    tasks = json.loads(Path(args.tasks).read_text(encoding="utf-8"))
+    variants = [v.strip() for v in args.variants.split(",") if v.strip()]
+    rows: list[dict[str, Any]] = []
+    for variant in variants:
+        for task in tasks:
+            for repeat in range(max(1, args.repeats)):
+                print(f"[{variant}] {task['id']} run {repeat + 1}/{args.repeats} ...", flush=True)
+                row = run_once(args.base, task, variant, args.timeout)
+                rows.append(row)
+                print(f"  success={row['success']} status={row['status']} "
+                      f"attempts={row['attemptCount']} budget={row['taskSpent']} "
+                      f"duration={row['duration']}s failures={row['failures']}", flush=True)
+
+    by_variant = {variant: summarize([r for r in rows if r["variant"] == variant])
+                  for variant in variants}
+    report = {"base": args.base, "timestamp": int(time.time()), "rows": rows, "summary": by_variant}
+    report_dir = Path(args.report_dir)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / "latest.json").write_text(json.dumps(report, ensure_ascii=False, indent=2),
+                                            encoding="utf-8")
+    lines = ["# Agent Benchmark", "", f"Base: `{args.base}`", "",
+             "| Variant | Tasks | Success | First attempt | Recovered | Avg attempts | Avg budget | Cost/success | P95 |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    for variant, s in by_variant.items():
+        lines.append(
+            f"| {variant} | {s['tasks']} | {s['successRate']*100:.1f}% | "
+            f"{s['firstAttemptSuccess']} | {s['recovered']} | {s['avgAttempts']} | "
+            f"{s['avgBudget']} | {s['costPerSuccess']} | {s['p95Seconds']}s |")
+    lines.extend(["", "## Task results", "",
+                  "| Variant | Task | Success | Status | Attempts | Budget | Duration | Failures |",
+                  "|---|---|---:|---|---:|---:|---:|---|"])
+    for row in rows:
+        lines.append(f"| {row['variant']} | {row['task']} | {'✅' if row['success'] else '❌'} | "
+                     f"{row['status']} | {row['attemptCount']} | {row['taskSpent']} | "
+                     f"{row['duration']}s | {', '.join(row['failures'])} |")
+    (report_dir / "latest.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n" + "\n".join(lines[:12]))
+    print(f"\nReport: {report_dir / 'latest.md'}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

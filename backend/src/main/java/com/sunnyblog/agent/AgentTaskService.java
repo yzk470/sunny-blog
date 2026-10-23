@@ -50,7 +50,9 @@ public class AgentTaskService {
 
     public record TaskView(String taskId, String sessionId, String clientTaskId, String status,
                            String question, String mode, String answer, String validation,
-                           long lastEventSeq, boolean active, List<AgentRunService.RunEvent> events) {
+                           long lastEventSeq, boolean active,
+                           int attemptCount, int taskBudget, int taskSpent, boolean highValue,
+                           List<AgentRunService.RunEvent> events) {
     }
 
     @PostConstruct
@@ -85,7 +87,7 @@ public class AgentTaskService {
     }
 
     public synchronized SseEmitter start(String sessionId, String clientTaskId, String question,
-                            String mode, List<String> knowledgeBaseIds) {
+                            String mode, List<String> knowledgeBaseIds, String benchmarkVariant) {
         String clientId = clientTaskId == null || clientTaskId.isBlank()
                 ? UUID.randomUUID().toString() : clientTaskId.trim();
         TaskChannel existingChannel = byClientTask.get(clientId);
@@ -103,7 +105,7 @@ public class AgentTaskService {
         byClientTask.put(clientId, channel);
         SseEmitter emitter = createEmitter(channel);
         channel.subscribers.add(emitter);
-        executor.submit(() -> execute(channel, sessionId, question, mode, knowledgeBaseIds));
+        executor.submit(() -> execute(channel, sessionId, question, mode, knowledgeBaseIds, benchmarkVariant));
         return emitter;
     }
 
@@ -178,9 +180,15 @@ public class AgentTaskService {
         AgentRunService.AgentRun run = runs.get(taskId);
         if (run == null) return null;
         TaskChannel channel = active.get(taskId);
+        AgentRunService.Checkpoint checkpoint = run.getCheckpoint();
         return new TaskView(run.getId(), run.getSessionId(), run.getClientTaskId(), run.getStatus(),
                 run.getQuestion(), run.getMode(), run.getAnswer(), run.getValidation(),
-                run.getEventSeq(), channel != null && !channel.done, run.getEvents());
+                run.getEventSeq(), channel != null && !channel.done,
+                checkpoint == null || checkpoint.getAttempts() == null ? 0 : checkpoint.getAttempts().size(),
+                checkpoint == null ? 0 : checkpoint.getTaskBudget(),
+                checkpoint == null ? 0 : checkpoint.getTaskSpent(),
+                checkpoint != null && checkpoint.isHighValue(),
+                run.getEvents());
     }
 
     public List<AgentRunService.RunEvent> events(String taskId, long afterSeq) {
@@ -203,9 +211,9 @@ public class AgentTaskService {
     }
 
     private void execute(TaskChannel channel, String sessionId, String question,
-                         String mode, List<String> knowledgeBaseIds) {
+                         String mode, List<String> knowledgeBaseIds, String benchmarkVariant) {
         try {
-            orchestrator.chat(sessionId, channel.clientTaskId, question, mode, knowledgeBaseIds,
+            orchestrator.chat(sessionId, channel.clientTaskId, question, mode, knowledgeBaseIds, benchmarkVariant,
                     event -> publish(channel, event));
         } catch (Exception ex) {
             log.warn("Agent task failed: {}", ex.getMessage(), ex);
