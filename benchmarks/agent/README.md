@@ -109,6 +109,10 @@ python benchmarks/agent/run_benchmark.py
 # 只跑当前实现
 python benchmarks/agent/run_benchmark.py --variants dynamic --repeats 1
 
+# 能力稳定性和安全防护分开跑
+python benchmarks/agent/run_benchmark.py --group capability --repeats 3
+python benchmarks/agent/run_benchmark.py --group security --repeats 3
+
 # 多轮（LLM 有随机性，建议 3 轮）
 python benchmarks/agent/run_benchmark.py --repeats 3
 ```
