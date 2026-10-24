@@ -11,6 +11,7 @@ const running = ref(false)
 const loading = ref(true)
 const variants = ref<string[]>(['linear', 'static', 'dynamic'])
 const repeats = ref(3)
+const workers = ref(6)
 const runGroup = ref<'capability' | 'security'>('capability')
 const timer = ref<number | null>(null)
 
@@ -49,6 +50,7 @@ async function start() {
       variants: variants.value.join(','),
       repeats: repeats.value,
       group: runGroup.value,
+      workers: workers.value,
       taskIds: [],
     })
     running.value = true
@@ -132,9 +134,11 @@ onBeforeUnmount(() => {
         </label>
         <label>每任务重复次数</label>
         <input v-model.number="repeats" type="number" min="1" max="5" />
+        <label>并发 workers</label>
+        <input v-model.number="workers" type="number" min="1" max="12" />
         <p class="benchmark-note">
           {{ runGroup === 'capability' ? '8 个能力任务' : '6 个安全任务' }} × 3 变体 × 3 次。
-          能力测试看稳定性和成本；安全测试看拒绝率与越权次数。
+          并发越高越快，但模型限流和 Office 竞争会导致超时；建议先 6。
         </p>
         <div class="benchmark-actions">
           <button class="btn btn-primary" :disabled="running" @click="start">

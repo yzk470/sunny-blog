@@ -1,7 +1,6 @@
 package com.sunnyblog.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -71,8 +70,6 @@ public class AgentMetricsAsyncQueue {
         }
     }
 
-    @PreDestroy
-    public void flushOnShutdown() {
-        if (enabled) drain();
-    }
+    // Do not drain from @PreDestroy: Spring stops Redis before this bean.
+    // Any remaining messages stay in Redis and are consumed after restart.
 }
