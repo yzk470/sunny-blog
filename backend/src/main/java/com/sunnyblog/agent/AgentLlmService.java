@@ -2,6 +2,7 @@ package com.sunnyblog.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
@@ -10,6 +11,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -19,6 +22,9 @@ public class AgentLlmService {
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final boolean configured;
+    // Model calls are I/O-bound. A dedicated virtual-thread executor avoids
+    // the shared ForkJoinPool throughput limit (which is CPU-count bound).
+    private final ExecutorService modelExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public AgentLlmService(ObjectProvider<ChatClient.Builder> builderProvider,
                            ObjectMapper objectMapper,
@@ -36,6 +42,11 @@ public class AgentLlmService {
         return configured;
     }
 
+    @PreDestroy
+    public void shutdown() {
+        modelExecutor.shutdownNow();
+    }
+
     public String complete(String system, String user, int timeoutSeconds) {
         if (!configured) throw new IllegalStateException("Agent 模型未配置，请设置 DEEPSEEK_API_KEY");
         try {
@@ -43,7 +54,7 @@ public class AgentLlmService {
                             .system(system)
                             .user(user)
                             .call()
-                            .content())
+                            .content(), modelExecutor)
                     .get(Math.max(10, timeoutSeconds), TimeUnit.SECONDS);
             if (content == null || content.isBlank()) throw new IllegalStateException("模型返回为空");
             return content.trim();

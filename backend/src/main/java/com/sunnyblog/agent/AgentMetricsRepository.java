@@ -120,6 +120,15 @@ public class AgentMetricsRepository {
     }
 
     public synchronized void save(AgentRunService.AgentRun run) {
+        // keep existing single-row implementation
+        saveOne(run);
+    }
+
+    public synchronized void saveAll(List<AgentRunService.AgentRun> runs) {
+        for (AgentRunService.AgentRun run : runs) saveOne(run);
+    }
+
+    private void saveOne(AgentRunService.AgentRun run) {
         try {
             AgentRunService.Checkpoint cp = run.getCheckpoint();
             if (cp == null) return;

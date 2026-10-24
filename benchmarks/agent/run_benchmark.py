@@ -9,10 +9,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
 import statistics
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -280,6 +282,7 @@ def main() -> int:
     parser.add_argument("--variants", default="linear,static,dynamic")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=360)
+    parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--task-ids", default="")
     parser.add_argument("--group", default="all", choices=["all", "capability", "security"])
     parser.add_argument("--report-dir", default=str(ROOT / "reports"))
@@ -292,16 +295,41 @@ def main() -> int:
         keep = {item.strip() for item in args.task_ids.split(",") if item.strip()}
         tasks = [task for task in tasks if task["id"] in keep]
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
+    jobs = [(variant, task, repeat)
+            for variant in variants
+            for task in tasks
+            for repeat in range(max(1, args.repeats))]
+    # Longest-processing-time-first reduces the tail. PPT/Office/report runs
+    # dominate duration, so they start first while quick tasks fill the end.
+    slow_tasks = {"cap-ppt-auto", "cap-ppt-explicit", "cap-text-report", "cap-docx-auto"}
+    jobs.sort(key=lambda job: (0 if job[1]["id"] in slow_tasks else 1, job[1]["id"]))
     rows: list[dict[str, Any]] = []
-    for variant in variants:
-        for task in tasks:
-            for repeat in range(max(1, args.repeats)):
-                print(f"[{variant}] {task['id']} run {repeat + 1}/{args.repeats} ...", flush=True)
+    skill_lock = threading.Lock()
+
+    def execute(job: tuple[str, dict[str, Any], int]) -> dict[str, Any]:
+        variant, task, repeat = job
+        print(f"[{variant}] {task['id']} run {repeat + 1}/{args.repeats} ...", flush=True)
+        if task["id"] == "cap-skill-evolve":
+            # Several tasks write the same skill directory; keep those serial.
+            with skill_lock:
                 row = run_once(args.base, task, variant, args.timeout)
-                rows.append(row)
-                print(f"  success={row['success']} status={row['status']} "
-                      f"attempts={row['attemptCount']} budget={row['taskSpent']} "
-                      f"duration={row['duration']}s failures={row['failures']}", flush=True)
+        else:
+            row = run_once(args.base, task, variant, args.timeout)
+        print(f"  [{variant}] {task['id']} success={row['success']} status={row['status']} "
+              f"attempts={row['attemptCount']} budget={row['taskSpent']} "
+              f"duration={row['duration']}s failures={row['failures']}", flush=True)
+        return row
+
+    workers = max(1, min(12, args.workers))
+    if workers == 1:
+        rows = [execute(job) for job in jobs]
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers,
+                                                   thread_name_prefix="bench") as pool:
+            futures = [pool.submit(execute, job) for job in jobs]
+            for future in concurrent.futures.as_completed(futures):
+                rows.append(future.result())
+    rows.sort(key=lambda row: (variants.index(row["variant"]), row["task"]))
 
     by_variant = {variant: summarize([r for r in rows if r["variant"] == variant])
                   for variant in variants}

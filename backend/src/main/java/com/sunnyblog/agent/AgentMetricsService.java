@@ -1,6 +1,7 @@
 package com.sunnyblog.agent;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -18,6 +19,8 @@ import java.util.concurrent.atomic.AtomicLong;
 public class AgentMetricsService {
 
     private final AgentMetricsRepository repository;
+    @Autowired(required = false)
+    private AgentMetricsAsyncQueue asyncQueue;
 
     private final AtomicLong tasks = new AtomicLong();
     private final AtomicLong successes = new AtomicLong();
@@ -62,6 +65,9 @@ public class AgentMetricsService {
             if (checkpoint.getSearch() != null) {
                 branches.addAndGet(checkpoint.getSearch().getBranchesExpanded());
             }
+        }
+        if (asyncQueue != null) {
+            if (asyncQueue.enqueue(run)) return;
         }
         repository.save(run);
     }
