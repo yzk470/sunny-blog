@@ -102,6 +102,15 @@ public class AgentFileTools {
         } catch (Exception ignored) {
             // Windows or a filesystem without POSIX permissions.
         }
+        // Some JVMs/filesystems silently drop the group-write bit from the
+        // POSIX API. The backend owns this directory, so an explicit chmod is
+        // a safe fallback and is required for the sunnyagent sandbox user.
+        try {
+            Process chmod = new ProcessBuilder("chmod", "2775", path.toString()).start();
+            chmod.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+            // Non-POSIX development environment.
+        }
     }
 
     private Path root(String name) {
