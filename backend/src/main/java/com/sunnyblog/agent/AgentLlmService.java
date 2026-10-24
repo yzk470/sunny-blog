@@ -49,19 +49,35 @@ public class AgentLlmService {
 
     public String complete(String system, String user, int timeoutSeconds) {
         if (!configured) throw new IllegalStateException("Agent 模型未配置，请设置 DEEPSEEK_API_KEY");
-        try {
-            String content = CompletableFuture.supplyAsync(() -> chatClient.prompt()
-                            .system(system)
-                            .user(user)
-                            .call()
-                            .content(), modelExecutor)
-                    .get(Math.max(10, timeoutSeconds), TimeUnit.SECONDS);
-            if (content == null || content.isBlank()) throw new IllegalStateException("模型返回为空");
-            return content.trim();
-        } catch (Exception ex) {
-            log.warn("Agent model call failed: {}", ex.getMessage());
-            throw new IllegalStateException("Agent 模型调用失败: " + ex.getMessage(), ex);
+        Exception last = null;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                String content = CompletableFuture.supplyAsync(() -> chatClient.prompt()
+                                .system(system)
+                                .user(user)
+                                .call()
+                                .content(), modelExecutor)
+                        .get(Math.max(10, timeoutSeconds), TimeUnit.SECONDS);
+                if (content == null || content.isBlank()) {
+                    throw new IllegalStateException("模型返回为空");
+                }
+                return content.trim();
+            } catch (Exception ex) {
+                last = ex;
+                if (attempt == 1) {
+                    log.warn("Agent model call failed (attempt 1), retrying: {}", ex.getMessage());
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
         }
+        log.warn("Agent model call failed: {}", last == null ? "unknown" : last.getMessage());
+        throw new IllegalStateException("Agent 模型调用失败: "
+                + (last == null ? "unknown" : last.getMessage()), last);
     }
 
     public JsonNode completeJson(String system, String user, int timeoutSeconds) {
