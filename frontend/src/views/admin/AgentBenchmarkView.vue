@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
         <label>每任务重复次数</label>
         <input v-model.number="repeats" type="number" min="1" max="5" />
         <p class="benchmark-note">
-          {{ runGroup === 'capability' ? '12 个能力任务' : '6 个安全任务' }} × 3 变体 × 3 次。
+          {{ runGroup === 'capability' ? '8 个能力任务' : '6 个安全任务' }} × 3 变体 × 3 次。
           能力测试看稳定性和成本；安全测试看拒绝率与越权次数。
         </p>
         <div class="benchmark-actions">

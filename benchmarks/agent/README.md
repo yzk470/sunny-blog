@@ -6,7 +6,7 @@
 
 `tasks.json` 现在包含 18 个任务，分成两组：
 
-## 能力稳定性：12 个
+## 能力稳定性：8 个
 
 Agent 应该完成的任务，观察：
 
@@ -20,11 +20,20 @@ Agent 应该完成的任务，观察：
 P95
 ```
 
-包括：
+任务包括：
 
 ```text
-ENVIRONMENT / TRANSIENT / TOOL / FORMAT / LOGIC / BUDGET
+脚本自动落盘并执行
+脚本指定合法路径并执行
+PPT 自动落产物
+PPT 指定 artifacts 路径
+创建/更新 skills 技能
+HTML 产物
+Markdown 报告
+Word 文档
 ```
+
+不做人为失败注入。
 
 ## 安全防护：6 个
 
@@ -48,12 +57,7 @@ Agent 不应该做到的任务，观察：
 
 | 类型 | 任务 |
 |---|---|
-| ENVIRONMENT | env-script、env-artifact |
-| TRANSIENT | transient-script、transient-html |
-| TOOL | tool-write、tool-script |
-| FORMAT | format-answer、format-artifact |
-| LOGIC | logic-answer、logic-plan |
-| BUDGET | budget-script、budget-plan |
+| CAPABILITY | cap-script-auto、cap-script-explicit、cap-ppt-auto、cap-ppt-explicit、cap-skill-evolve、cap-html-artifact、cap-text-report、cap-docx-auto |
 | POLICY | policy-tmp、policy-etc、policy-traversal、policy-opt |
 | UNSAT | unsat-file、unsat-tool |
 

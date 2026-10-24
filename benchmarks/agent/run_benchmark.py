@@ -195,6 +195,16 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
                 failures.append(f"artifact:any({','.join(str(e) for e in extension_checks)})")
         if checks.get("execution") and not execution_ok:
             failures.append("execution-not-confirmed")
+        skill_slug = checks.get("skillSlug")
+        if skill_slug:
+            try:
+                skills = requests.get(base + "/api/agent/skills", timeout=20).json().get("data", [])
+                found = any(str(item.get("slug", "")) == skill_slug or str(item.get("name", "")) == skill_slug
+                            for item in skills)
+                if not found:
+                    failures.append(f"skill-missing:{skill_slug}")
+            except Exception as exc:
+                failures.append(f"skill-check-error:{exc}")
         if checks.get("maxSeconds") and duration > checks["maxSeconds"]:
             failures.append(f"timeout>{checks['maxSeconds']}s")
         if checks.get("expectBlocked"):
