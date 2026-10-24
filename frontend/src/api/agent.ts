@@ -48,6 +48,7 @@ export interface AgentRun {
   createdAt: string
   updatedAt: string
   steps: AgentRunStep[]
+  stepCount?: number
 }
 
 export interface AgentArtifact {
@@ -276,8 +277,8 @@ export const agentApi = {
   deleteSkill(slug: string) {
     return httpDelete<void>(`/admin/agent/skills/${encodeURIComponent(slug)}`)
   },
-  runs() {
-    return httpGet<AgentRun[]>('/admin/agent/runs')
+  runs(limit = 30) {
+    return httpGet<AgentRun[]>(`/admin/agent/runs?limit=${limit}`)
   },
   metrics() {
     return httpGet<AgentMetrics>('/admin/agent/metrics')

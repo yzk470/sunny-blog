@@ -32,6 +32,17 @@ public class AgentAdminController {
     public record BenchmarkRequest(String variants, int repeats, String group, List<String> taskIds) {
     }
 
+    public record RunSummary(String id, String sessionId, String clientTaskId, String mode,
+                             String question, String status, String validation,
+                             String createdAt, String updatedAt, long eventSeq, int stepCount) {
+    }
+
+    public record RunDetail(String id, String sessionId, String clientTaskId, String mode,
+                            String question, String status, String answer, String validation,
+                            String createdAt, String updatedAt, long eventSeq,
+                            List<AgentRunService.RunStep> steps) {
+    }
+
     @GetMapping("/skills")
     public ApiResponse<List<AgentSkillsService.Skill>> skills() {
         return ApiResponse.ok(skills.list());
@@ -75,14 +86,23 @@ public class AgentAdminController {
     }
 
     @GetMapping("/runs")
-    public ApiResponse<List<AgentRunService.AgentRun>> runs() {
-        return ApiResponse.ok(runs.list());
+    public ApiResponse<List<RunSummary>> runs(@RequestParam(defaultValue = "30") int limit) {
+        return ApiResponse.ok(runs.list(limit).stream()
+                .map(run -> new RunSummary(run.getId(), run.getSessionId(), run.getClientTaskId(),
+                        run.getMode(), run.getQuestion(), run.getStatus(), run.getValidation(),
+                        run.getCreatedAt(), run.getUpdatedAt(), run.getEventSeq(),
+                        run.getSteps() == null ? 0 : run.getSteps().size()))
+                .toList());
     }
 
     @GetMapping("/runs/{id}")
-    public ApiResponse<AgentRunService.AgentRun> run(@PathVariable String id) {
+    public ApiResponse<RunDetail> run(@PathVariable String id) {
         AgentRunService.AgentRun run = runs.get(id);
-        return run == null ? ApiResponse.fail(404, "运行记录不存在") : ApiResponse.ok(run);
+        return run == null ? ApiResponse.fail(404, "运行记录不存在")
+                : ApiResponse.ok(new RunDetail(run.getId(), run.getSessionId(), run.getClientTaskId(),
+                run.getMode(), run.getQuestion(), run.getStatus(), run.getAnswer(),
+                run.getValidation(), run.getCreatedAt(), run.getUpdatedAt(), run.getEventSeq(),
+                run.getSteps() == null ? List.of() : run.getSteps()));
     }
 
     @GetMapping("/metrics")

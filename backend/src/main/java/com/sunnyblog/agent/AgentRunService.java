@@ -283,12 +283,17 @@ public class AgentRunService {
     }
 
     public synchronized List<AgentRun> list() {
+        return list(200);
+    }
+
+    public synchronized List<AgentRun> list(int limit) {
         List<AgentRun> runs = new ArrayList<>();
         Path root = runsRoot();
+        int safeLimit = Math.max(1, Math.min(100, limit));
         try (Stream<Path> stream = Files.list(root)) {
             stream.filter(p -> p.getFileName().toString().endsWith(".json"))
                     .sorted(Comparator.comparing((Path p) -> p.getFileName().toString()).reversed())
-                    .limit(200)
+                    .limit(safeLimit)
                     .forEach(path -> {
                         AgentRun run = read(path);
                         if (run != null) runs.add(run);

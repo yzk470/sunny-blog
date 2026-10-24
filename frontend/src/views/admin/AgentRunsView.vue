@@ -30,7 +30,13 @@ async function load() {
     const requested = String(route.query.run || '')
     const target = runs.value.find((run) => run.id === requested)
     if (!selected.value && target) await open(target)
-    else if (!selected.value && runs.value.length) await open(runs.value[0])
+    else if (!selected.value && requested) {
+      try {
+        selected.value = await agentApi.run(requested)
+      } catch {
+        if (runs.value.length) await open(runs.value[0])
+      }
+    } else if (!selected.value && runs.value.length) await open(runs.value[0])
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '加载执行记录失败', 'error')
   } finally {
