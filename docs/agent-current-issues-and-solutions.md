@@ -1,15 +1,15 @@
 # Agent 当前问题与解决方案
 
 > 更新时间：2026-10-24  
-> 文档状态：执行链路问题已修复；性能优化第一版已实施并完成小规模验证
+> 文档状态：执行链路问题已修复；性能优化第一版已实施；A/B 完成；4 并发完整跑完 126 次
 
-## 〇、性能优化第一版
+## 〇、性能优化结果
 
 已经实现：
 
 ```text
 Benchmark runner 并发
-workers 默认 6
+workers 默认 4
 LPT 长任务优先
 cap-skill-evolve 串行锁
 AgentLlmService 专用虚拟线程执行器
@@ -18,28 +18,80 @@ Redis 异步指标队列
 Redis 队列批量落库
 ```
 
-小规模实测：
+## A/B 结果
 
-| 任务数 | 串行总耗时 | 6 并发 wall time | 加速比 |
+12 个任务、1 次重复、dynamic 变体：
+
+| workers | wall time | 成功 | 失败 |
+|---:|---:|---:|---|
+| 4 | 208.5s | 12/12 | 0 |
+| 6 | 207.9s | 11/12 | unsat-file 误产物 |
+
+结论：
+
+```text
+6 并发没有比 4 并发更快
+但 6 并发多了一次 unsat-file 安全失败
+因此稳定选择 workers = 4
+```
+
+## 完整 126 次结果
+
+```text
+workers：4
+wall time：2409.0 秒 = 40 分 9 秒
+旧串行基线：8218.6 秒 = 2 小时 16 分 59 秒
+提速：约 3.4 倍
+```
+
+全部任务耗时之和：
+
+```text
+7006.4 秒
+```
+
+并发效率：
+
+```text
+7006.4 / 2409.0 ≈ 2.9
+```
+
+完整结果：
+
+| 变体 | 能力成功 | 安全通过 | 越权 |
 |---|---:|---:|---:|
-| 4 | 507.3s | 363.2s | 1.4x |
-| 8 | 783.8s | 368.3s | 2.1x |
+| linear | 22/24 | 17/18 | 0 |
+| static | 22/24 | 15/18 | 0 |
+| dynamic | 24/24 | 16/18 | 0 |
 
-两次测试里都有一个 `cap-text-report` 长任务接近 360 秒，成为尾部瓶颈，因此加速比没有达到理论上限。
+汇总：
 
-Redis 指标队列验证：
+```text
+能力：68/72 = 94.4%
+安全：48/54 = 88.9%
+scopeViolations：0
+unsat-tool：9/9 BLOCKED
+```
+
+## Redis 指标队列
 
 ```text
 LLEN agent:metrics:queue = 0
 任务指标已通过队列落入 MySQL
+完整运行指标已核对：
+  能力任务 72
+  能力成功 68
+  安全任务 54
+  安全通过 48
 ```
 
-完整 126 次并发复测尚未执行。下一步需要先确定：
+## 仍未完成
 
 ```text
-workers = 4 还是 6
-长文本报告是否放宽 timeout
-模型 API 是否真的支持 6 并发
+429 全局 token bucket
+高价值任务分支并行
+长文本报告 timeout 调优
+更细的 P95/队列等待监控
 ```
 
 ## 一、当前结论
@@ -282,7 +334,7 @@ N 个 worker 并发执行
 推荐：
 
 ```text
-workers = 6
+workers = 4
 max_in_flight = 12
 per_task_timeout = 360s
 ```
@@ -429,7 +481,7 @@ CPU 不是主要瓶颈
 ```text
 执行链路列表轻量化
 执行链路详情轻量化
-Benchmark runner 并发 workers=6
+Benchmark runner 并发 workers=4
 LPT 长任务优先调度
 cap-skill-evolve 串行锁
 AgentLlmService 专用虚拟线程执行器
@@ -471,7 +523,7 @@ workers=4/6 稳定性对比
 建议按顺序：
 
 ```text
-1. benchmark runner 并发 workers=6
+1. benchmark runner 并发 workers=4
 2. AgentLlmService 专用虚拟线程执行器
 3. 增加 429 退避和连接池
 4. 小规模 A/B：12 个任务

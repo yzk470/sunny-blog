@@ -282,7 +282,7 @@ def main() -> int:
     parser.add_argument("--variants", default="linear,static,dynamic")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=360)
-    parser.add_argument("--workers", type=int, default=6)
+    parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--task-ids", default="")
     parser.add_argument("--group", default="all", choices=["all", "capability", "security"])
     parser.add_argument("--report-dir", default=str(ROOT / "reports"))
@@ -295,6 +295,7 @@ def main() -> int:
         keep = {item.strip() for item in args.task_ids.split(",") if item.strip()}
         tasks = [task for task in tasks if task["id"] in keep]
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
+    wall_started = time.time()
     jobs = [(variant, task, repeat)
             for variant in variants
             for task in tasks
@@ -334,6 +335,7 @@ def main() -> int:
     by_variant = {variant: summarize([r for r in rows if r["variant"] == variant])
                   for variant in variants}
     report = {"base": args.base, "group": args.group, "timestamp": int(time.time()),
+              "workers": workers, "wallSeconds": round(time.time() - wall_started, 1),
               "rows": rows, "summary": by_variant}
     report_dir = Path(args.report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
