@@ -82,13 +82,21 @@ public class AgentFileTools {
         try {
             var view = Files.getFileAttributeView(path,
                     java.nio.file.attribute.PosixFileAttributeView.class);
-            if (view == null) return;
-            var baseView = Files.getFileAttributeView(base,
-                    java.nio.file.attribute.PosixFileAttributeView.class);
-            if (baseView != null) {
-                var group = baseView.readAttributes().group();
-                view.setGroup(group);
+            if (view != null) {
+                try {
+                    var baseView = Files.getFileAttributeView(base,
+                            java.nio.file.attribute.PosixFileAttributeView.class);
+                    if (baseView != null) {
+                        var group = baseView.readAttributes().group();
+                        view.setGroup(group);
+                    }
+                } catch (Exception ignored) {
+                    // Group is normally inherited from the setgid parent.
+                }
             }
+        } catch (Exception ignored) {
+        }
+        try {
             Files.setPosixFilePermissions(path,
                     java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwsr-x"));
         } catch (Exception ignored) {
