@@ -1,0 +1,132 @@
+{
+  "capability": {
+    "startedAt": "2026-10-24T05:33:26.950090979Z",
+    "finishedAt": "2026-10-24T06:52:58.855092762Z",
+    "report": "benchmarks\\agent\\reports\\full-capability.json",
+    "summary": {
+      "linear": {
+        "tasks": 24,
+        "securityTasks": 0,
+        "securityPassed": 0,
+        "securityPassRate": 1.0,
+        "scopeViolations": 0,
+        "successes": 24,
+        "successRate": 1.0,
+        "firstAttemptSuccess": 22,
+        "recovered": 2,
+        "recoveryRate": 1.0,
+        "avgAttempts": 1,
+        "avgBudget": 10.33,
+        "costPerSuccess": 10.33,
+        "p95Seconds": 119.922,
+        "failureTypes": []
+      },
+      "static": {
+        "tasks": 24,
+        "securityTasks": 0,
+        "securityPassed": 0,
+        "securityPassRate": 1.0,
+        "scopeViolations": 0,
+        "successes": 21,
+        "successRate": 0.875,
+        "firstAttemptSuccess": 19,
+        "recovered": 2,
+        "recoveryRate": 0.5,
+        "avgAttempts": 1.21,
+        "avgBudget": 15.5,
+        "costPerSuccess": 17.71,
+        "p95Seconds": 249.537,
+        "failureTypes": [
+          "LOGIC"
+        ]
+      },
+      "dynamic": {
+        "tasks": 24,
+        "securityTasks": 0,
+        "securityPassed": 0,
+        "securityPassRate": 1.0,
+        "scopeViolations": 0,
+        "successes": 23,
+        "successRate": 0.9583,
+        "firstAttemptSuccess": 23,
+        "recovered": 0,
+        "recoveryRate": 0.0,
+        "avgAttempts": 1.08,
+        "avgBudget": 14.17,
+        "costPerSuccess": 14.78,
+        "p95Seconds": 171.775,
+        "failureTypes": [
+          "LOGIC"
+        ]
+      }
+    },
+    "rows": 72,
+    "durationSeconds": 4771.9,
+    "durationText": "1h19m32s"
+  },
+  "security": {
+    "startedAt": "2026-10-24T06:53:14.942458810Z",
+    "finishedAt": "2026-10-24T07:50:25.544125095Z",
+    "report": "benchmarks\\agent\\reports\\full-security.json",
+    "summary": {
+      "linear": {
+        "tasks": 0,
+        "securityTasks": 18,
+        "securityPassed": 16,
+        "securityPassRate": 0.8889,
+        "scopeViolations": 0,
+        "successes": 0,
+        "successRate": 0,
+        "firstAttemptSuccess": 0,
+        "recovered": 0,
+        "recoveryRate": 0.0,
+        "avgAttempts": 0,
+        "avgBudget": 0,
+        "costPerSuccess": 0.0,
+        "p95Seconds": 0,
+        "failureTypes": []
+      },
+      "static": {
+        "tasks": 0,
+        "securityTasks": 18,
+        "securityPassed": 16,
+        "securityPassRate": 0.8889,
+        "scopeViolations": 0,
+        "successes": 0,
+        "successRate": 0,
+        "firstAttemptSuccess": 0,
+        "recovered": 0,
+        "recoveryRate": 0.0,
+        "avgAttempts": 0,
+        "avgBudget": 0,
+        "costPerSuccess": 0.0,
+        "p95Seconds": 0,
+        "failureTypes": []
+      },
+      "dynamic": {
+        "tasks": 0,
+        "securityTasks": 18,
+        "securityPassed": 15,
+        "securityPassRate": 0.8333,
+        "scopeViolations": 0,
+        "successes": 0,
+        "successRate": 0,
+        "firstAttemptSuccess": 0,
+        "recovered": 0,
+        "recoveryRate": 0.0,
+        "avgAttempts": 0,
+        "avgBudget": 0,
+        "costPerSuccess": 0.0,
+        "p95Seconds": 0,
+        "failureTypes": [
+          "LOGIC"
+        ]
+      }
+    },
+    "rows": 54,
+    "durationSeconds": 3430.6,
+    "durationText": "0h57m11s"
+  },
+  "wallSeconds": 8218.6,
+  "wallText": "2h16m59s"
+}
