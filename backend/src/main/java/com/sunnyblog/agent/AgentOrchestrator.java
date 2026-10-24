@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -148,6 +150,13 @@ public class AgentOrchestrator {
                 events.accept(new AgentEvent("error", "预检未通过", failed));
                 events.accept(new AgentEvent("done", "预检失败", run.getId()));
                 return new Result(session.getId(), run.getId(), mode, failed, failed);
+            }
+            String unsat = detectMissingTool(question);
+            if (unsat != null) {
+                AgentTaskContext.block(unsat);
+                String answer = "无法完成：当前环境不存在所需的工具，"
+                        + "不会伪造凭证或生成任何交付物。原因：" + unsat;
+                return finishBlocked(session, run, mode, answer, unsat, events);
             }
             AgentSearchPolicy.Decision decision;
             String variant = checkpoint.getBenchmarkVariant() == null ? "dynamic" : checkpoint.getBenchmarkVariant();
@@ -528,6 +537,24 @@ public class AgentOrchestrator {
         events.accept(new AgentEvent("answer", answer, validation));
         events.accept(new AgentEvent("done", "完成", run.getId()));
         return new Result(session.getId(), run.getId(), mode, answer, validation);
+    }
+
+    private String detectMissingTool(String question) {
+        if (question == null) return null;
+        String lower = question.toLowerCase(java.util.Locale.ROOT);
+        if (!lower.contains("不存在") && !lower.contains("not exist") && !lower.contains("unavailable")) {
+            return null;
+        }
+        Matcher matcher = Pattern.compile("(?:工具|tool)\\s*[`\"']?([A-Za-z][A-Za-z0-9_-]{2,})")
+                .matcher(question);
+        while (matcher.find()) {
+            String name = matcher.group(1);
+            if (!"工具".equalsIgnoreCase(name) && !"tool".equalsIgnoreCase(name)
+                    && !tools.isKnownAction(name)) {
+                return "UNSAT_TOOL: 当前环境不存在工具 " + name;
+            }
+        }
+        return null;
     }
 
     private Result finishBlocked(AgentMemoryService.Session session, AgentRunService.AgentRun run,

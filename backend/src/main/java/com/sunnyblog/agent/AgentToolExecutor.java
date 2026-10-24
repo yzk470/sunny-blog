@@ -40,6 +40,15 @@ public class AgentToolExecutor {
         return sb.toString();
     }
 
+    public static boolean isKnownAction(String action) {
+        return switch (action == null ? "" : action) {
+            case "list_skills", "read_skill", "read_file", "write_file", "list_files",
+                 "delete_file", "inspect_artifact", "search_knowledge",
+                 "run_script", "run_command" -> true;
+            default -> false;
+        };
+    }
+
     private static boolean sideEffect(String action) {
         return "write_file".equals(action) || "delete_file".equals(action)
                 || "run_script".equals(action) || "run_command".equals(action);
