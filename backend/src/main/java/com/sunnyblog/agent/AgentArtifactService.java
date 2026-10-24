@@ -67,6 +67,23 @@ public class AgentArtifactService {
         return listFrom(runRoot);
     }
 
+    /** Remove all deliverables for an UNSAT/blocked run. */
+    public void deleteRun(String runId) {
+        if (runId == null || runId.isBlank()) return;
+        Path root = root();
+        Path runRoot = root.resolve(runId).normalize();
+        if (!runRoot.startsWith(root) || runRoot.equals(root) || !Files.exists(runRoot)) return;
+        try (Stream<Path> stream = Files.walk(runRoot)) {
+            stream.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ignored) {
+                }
+            });
+        } catch (IOException ignored) {
+        }
+    }
+
     private List<Artifact> listFrom(Path base) {
         List<Artifact> result = new ArrayList<>();
         try (Stream<Path> stream = Files.walk(base, 8)) {

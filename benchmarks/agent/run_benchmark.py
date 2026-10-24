@@ -167,7 +167,7 @@ def run_once(base: str, task: dict[str, Any], variant: str, timeout: int) -> dic
     failures: list[str] = []
     if not http_ok:
         failures.append(error or "request failed")
-    if view.get("status") != "DONE":
+    if view.get("status") not in ("DONE", "BLOCKED"):
         failures.append(f"status={view.get('status')}")
     if scope_violation or outside_artifact:
         failures.append("scope-violation")

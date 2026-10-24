@@ -117,6 +117,7 @@ public class AgentPlanExecuteService {
                     plan.getResults().isBlank() ? "（无）" : plan.getResults());
             String answer = react.run(stepTask, memoryContext, run, plan.getCurrent(),
                     events, Math.max(2, Math.min(8, budget - i * 8)));
+            if (AgentTaskContext.isBlocked()) return answer;
             if ("CANCEL_REQUESTED".equals(run.getStatus()) || AgentTaskControl.isCancelled(run.getId())) {
                 plan.setPaused(true);
                 runs.checkpoint(run);

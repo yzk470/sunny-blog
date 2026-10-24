@@ -308,6 +308,23 @@ public class AgentOrchestrator {
             attempt.setExecutionEvidence(executionEvidence(checkpoint));
             runs.checkpoint(run);
 
+            String blocked = AgentTaskContext.blockedReason();
+            if (blocked != null) {
+                attempt.setStatus("BLOCKED");
+                attempt.setEndedAt(java.time.Instant.now().toString());
+                attempt.setFailureType("UNSAT");
+                attempt.setFailureReason(blocked);
+                attempt.setArtifacts(List.of());
+                artifacts.deleteRun(run.getId());
+                strategy.setStatus("BLOCKED");
+                AgentRunService.SearchNode blockedNode = findNode(checkpoint, strategy.getId());
+                if (blockedNode != null) blockedNode.setStatus("BLOCKED");
+                checkpoint.setBestAnswer(answer);
+                checkpoint.setBestAttemptId(attempt.getId());
+                runs.checkpoint(run);
+                return finishBlocked(session, run, mode, answer, blocked, events);
+            }
+
             Verdict verdict = verifyAttempt(question, run, checkpoint, attempt, answer);
             if (verdict.passed()) {
                 attempt.setStatus("SUCCESS");
@@ -511,6 +528,21 @@ public class AgentOrchestrator {
         events.accept(new AgentEvent("answer", answer, validation));
         events.accept(new AgentEvent("done", "完成", run.getId()));
         return new Result(session.getId(), run.getId(), mode, answer, validation);
+    }
+
+    private Result finishBlocked(AgentMemoryService.Session session, AgentRunService.AgentRun run,
+                                 String mode, String answer, String reason,
+                                 Consumer<AgentEvent> events) {
+        artifacts.deleteRun(run.getId());
+        memory.append(session.getId(), "assistant", answer, "MEDIUM", "blocked");
+        runs.addStep(run, "BLOCKED", "任务不可满足", reason, false);
+        runs.finish(run, answer, "BLOCKED", reason);
+        metrics.record(run);
+        events.accept(new AgentEvent("artifacts", "任务不可满足，未生成交付物", "[]"));
+        events.accept(new AgentEvent("blocked", "已明确拒绝并终止", reason));
+        events.accept(new AgentEvent("answer", answer, reason));
+        events.accept(new AgentEvent("done", "已拒绝", run.getId()));
+        return new Result(session.getId(), run.getId(), mode, answer, reason);
     }
 
     private Result finishBestEffort(AgentMemoryService.Session session, AgentRunService.AgentRun run,

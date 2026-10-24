@@ -40,7 +40,16 @@ public class AgentToolExecutor {
         return sb.toString();
     }
 
+    private static boolean sideEffect(String action) {
+        return "write_file".equals(action) || "delete_file".equals(action)
+                || "run_script".equals(action) || "run_command".equals(action);
+    }
+
     public AgentFileTools.ToolResult execute(String action, JsonNode input) {
+        if (AgentTaskContext.isBlocked() && sideEffect(action)) {
+            return AgentFileTools.ToolResult.fail(
+                    "UNSAT_BLOCKED: 任务不可满足，禁止继续生成或修改产物");
+        }
         String injected = AgentFaultInjection.takeToolFailure(action == null ? "" : action);
         if (injected != null) {
             return AgentFileTools.ToolResult.fail(injected);

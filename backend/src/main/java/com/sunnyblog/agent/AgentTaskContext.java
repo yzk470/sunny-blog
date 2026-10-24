@@ -10,6 +10,7 @@ public final class AgentTaskContext {
     }
 
     private static final ThreadLocal<Task> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<String> BLOCKED = new ThreadLocal<>();
 
     private AgentTaskContext() {
     }
@@ -20,6 +21,19 @@ public final class AgentTaskContext {
 
     public static void set(String sessionId, String runId, String attemptId) {
         CURRENT.set(new Task(sessionId, runId, attemptId));
+        BLOCKED.remove();
+    }
+
+    public static void block(String reason) {
+        BLOCKED.set(reason == null || reason.isBlank() ? "UNSAT" : reason);
+    }
+
+    public static String blockedReason() {
+        return BLOCKED.get();
+    }
+
+    public static boolean isBlocked() {
+        return BLOCKED.get() != null;
     }
 
     public static Task current() {
@@ -43,5 +57,6 @@ public final class AgentTaskContext {
 
     public static void clear() {
         CURRENT.remove();
+        BLOCKED.remove();
     }
 }

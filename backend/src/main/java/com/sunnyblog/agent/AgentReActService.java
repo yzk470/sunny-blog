@@ -272,6 +272,14 @@ public class AgentReActService {
             events.accept(new AgentEvent("tool_end", action + (result.success() ? " 完成" : " 失败"),
                     result.output()));
             record(run, "TOOL", action, result.output(), result.success());
+            if (!result.success() && result.output().startsWith("未知工具:")) {
+                AgentTaskContext.block("UNSAT_TOOL: 当前环境不存在工具 " + action);
+                String blocked = "无法完成：当前环境不存在工具 `" + action
+                        + "`，不会伪造凭证或交付物。";
+                record(run, "BLOCKED", "任务不可满足", blocked, false);
+                events.accept(new AgentEvent("blocked", "未知工具，终止执行", blocked));
+                return blocked;
+            }
             lastToolFailed = !result.success();
             consecutiveFailures = result.success() ? 0 : consecutiveFailures + 1;
             if (result.success() && (action.equals("run_script") || action.equals("run_command"))) {
