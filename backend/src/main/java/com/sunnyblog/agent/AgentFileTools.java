@@ -58,21 +58,42 @@ public class AgentFileTools {
         Path runRoot = base.resolve(runId).normalize();
         if (!runRoot.startsWith(base)) throw new IllegalStateException("非法任务产物路径");
         String attemptId = AgentTaskContext.attemptId();
+        Path attempts = runRoot.resolve("attempts").normalize();
         Path target = attemptId == null || attemptId.isBlank()
-                ? runRoot : runRoot.resolve("attempts").resolve(attemptId).normalize();
+                ? runRoot : attempts.resolve(attemptId).normalize();
         if (!target.startsWith(runRoot)) throw new IllegalStateException("非法尝试产物路径");
         try {
             Files.createDirectories(target);
-            try {
-                Files.setPosixFilePermissions(target,
-                        java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxr-x"));
-            } catch (UnsupportedOperationException ignored) {
-                // Windows development environment.
-            }
+            applySandboxDir(runRoot, base);
+            if (!attempts.equals(runRoot)) applySandboxDir(attempts, base);
+            if (!target.equals(runRoot) && !target.equals(attempts)) applySandboxDir(target, base);
         } catch (IOException ex) {
             throw new IllegalStateException("无法创建任务产物目录", ex);
         }
         return target;
+    }
+
+    /**
+     * The Java process creates attempt directories as sunnyblog, while scripts
+     * run as sunnyagent. Without an explicit group and setgid bit the nested
+     * attempts directory keeps group sunnyblog and the sandbox cannot write.
+     */
+    private void applySandboxDir(Path path, Path base) {
+        try {
+            var view = Files.getFileAttributeView(path,
+                    java.nio.file.attribute.PosixFileAttributeView.class);
+            if (view == null) return;
+            var baseView = Files.getFileAttributeView(base,
+                    java.nio.file.attribute.PosixFileAttributeView.class);
+            if (baseView != null) {
+                var group = baseView.readAttributes().group();
+                view.setGroup(group);
+            }
+            Files.setPosixFilePermissions(path,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwsr-x"));
+        } catch (Exception ignored) {
+            // Windows or a filesystem without POSIX permissions.
+        }
     }
 
     private Path root(String name) {
