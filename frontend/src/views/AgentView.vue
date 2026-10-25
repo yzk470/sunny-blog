@@ -726,21 +726,21 @@ function formatSize(size: number) {
 .agent-activity pre { margin: 0; padding: 8px 10px 9px; border-top: 1px solid rgba(115, 135, 154, 0.12); color: #5b6b7a; font-family: 'SFMono-Regular', Consolas, monospace; font-size: 10.5px; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
 .agent-bubble { width: fit-content; max-width: 100%; padding: 10px 13px; border-radius: 4px 14px 14px 14px; background: #edf2f6; color: #34495c; font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
 .agent-bubble.assistant { width: 100%; max-width: 820px; white-space: normal; }
-.agent-bubble.assistant .markdown-body { font-size: 13px; line-height: 1.8; }
-.agent-bubble.assistant .markdown-body h1 { font-size: 20px; }
-.agent-bubble.assistant .markdown-body h2 { font-size: 17px; }
-.agent-bubble.assistant .markdown-body h3 { font-size: 14px; }
-.agent-bubble.assistant .markdown-body h1,
-.agent-bubble.assistant .markdown-body h2,
-.agent-bubble.assistant .markdown-body h3,
-.agent-bubble.assistant .markdown-body h4 { margin: 14px 0 6px; }
-.agent-bubble.assistant .markdown-body p { margin: 0 0 8px; }
-.agent-bubble.assistant .markdown-body ul,
-.agent-bubble.assistant .markdown-body ol { margin: 6px 0 10px; padding-left: 22px; }
-.agent-bubble.assistant .markdown-body li { margin: 2px 0; }
-.agent-bubble.assistant .markdown-body code { font-size: 11px; }
-.agent-bubble.assistant .markdown-body pre { margin: 8px 0; max-width: 100%; overflow: auto; }
-.agent-bubble.assistant .markdown-body table { width: 100%; margin: 8px 0; }
+.agent-bubble.assistant :deep(.markdown-body) { font-size: 13px; line-height: 1.8; }
+.agent-bubble.assistant :deep(.markdown-body h1) { font-size: 20px; }
+.agent-bubble.assistant :deep(.markdown-body h2) { font-size: 17px; }
+.agent-bubble.assistant :deep(.markdown-body h3) { font-size: 14px; }
+.agent-bubble.assistant :deep(.markdown-body h1),
+.agent-bubble.assistant :deep(.markdown-body h2),
+.agent-bubble.assistant :deep(.markdown-body h3),
+.agent-bubble.assistant :deep(.markdown-body h4) { margin: 14px 0 6px; }
+.agent-bubble.assistant :deep(.markdown-body p) { margin: 0 0 8px; }
+.agent-bubble.assistant :deep(.markdown-body ul),
+.agent-bubble.assistant :deep(.markdown-body ol) { margin: 6px 0 10px; padding-left: 22px; }
+.agent-bubble.assistant :deep(.markdown-body li) { margin: 2px 0; }
+.agent-bubble.assistant :deep(.markdown-body code) { font-size: 11px; }
+.agent-bubble.assistant :deep(.markdown-body pre) { margin: 8px 0; max-width: 100%; overflow: auto; }
+.agent-bubble.assistant :deep(.markdown-body table) { width: 100%; margin: 8px 0; }
 .agent-row.user .agent-bubble { border-radius: 14px 4px 14px 14px; background: #2f4d69; color: #f8fbfd; }
 .agent-bubble.failed { background: #fbefed; color: #8e5148; }
 .agent-bubble.thinking { color: #798895; }
