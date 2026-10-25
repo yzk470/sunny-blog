@@ -730,6 +730,10 @@ function formatSize(size: number) {
 .agent-bubble.assistant .markdown-body h1 { font-size: 20px; }
 .agent-bubble.assistant .markdown-body h2 { font-size: 17px; }
 .agent-bubble.assistant .markdown-body h3 { font-size: 14px; }
+.agent-bubble.assistant .markdown-body h1,
+.agent-bubble.assistant .markdown-body h2,
+.agent-bubble.assistant .markdown-body h3,
+.agent-bubble.assistant .markdown-body h4 { margin: 14px 0 6px; }
 .agent-bubble.assistant .markdown-body p { margin: 0 0 8px; }
 .agent-bubble.assistant .markdown-body ul,
 .agent-bubble.assistant .markdown-body ol { margin: 6px 0 10px; padding-left: 22px; }
