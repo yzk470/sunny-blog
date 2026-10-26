@@ -74,13 +74,12 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
         String candidates = game.aliveGoodView().stream()
                 .map(p -> "- " + p.getName() + "(" + p.getId() + ")")
                 .collect(Collectors.joining("\n"));
-        String system = roleSystem(game, wolf, """
-                你是狼人。目标必须是存活好人，不能是狼队友。
-                考虑谁最可能威胁狼队、谁像预言家/女巫/猎人、谁怀疑过你们，以及白天票型。
-                输出 JSON：{"targetId":"pX","reason":"一句中文理由"}
-                """);
-        String user = publicUser(game, "可袭击的好人：\n" + candidates + "\n\n请决定今晚杀谁，输出 JSON。");
-        JsonNode json = callJson(system, user, 40);
+        WerewolfPromptBuilder.Prompt prompt = WerewolfPromptBuilder.build(game, wolf,
+                "你的身份是狼人。目标必须是存活好人，不能是狼队友。\n"
+                        + "考虑谁最可能威胁狼队、谁像预言家/女巫/猎人、谁怀疑过你们，以及白天票型。\n"
+                        + "可袭击的好人：\n" + candidates,
+                "只输出一个 JSON 对象：{\"targetId\":\"pX\",\"reason\":\"一句中文理由\"}。");
+        JsonNode json = callJson(prompt.system(), prompt.user(), 40);
         String target = resolveId(game, textOrNull(json, "targetId"));
         log.info("Werewolf AI wolf target: {} ({})", target, textOrNull(json, "reason"));
         return target;
@@ -93,12 +92,11 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                 .filter(p -> !p.getId().equals(seer.getId()))
                 .map(p -> "- " + p.getName() + "(" + p.getId() + ")")
                 .collect(Collectors.joining("\n"));
-        String system = roleSystem(game, seer, """
-                你是预言家。优先查验发言矛盾、带节奏、被多人怀疑、尚未查验的玩家。
-                输出 JSON：{"targetId":"pX","reason":"一句中文理由"}
-                """);
-        String user = publicUser(game, "可查验玩家：\n" + candidates + "\n\n请决定今晚查验谁，输出 JSON。");
-        JsonNode json = callJson(system, user, 40);
+        WerewolfPromptBuilder.Prompt prompt = WerewolfPromptBuilder.build(game, seer,
+                "你的身份是预言家。优先查验发言矛盾、带节奏、被多人怀疑、尚未查验的玩家。\n"
+                        + "可查验玩家：\n" + candidates,
+                "只输出一个 JSON 对象：{\"targetId\":\"pX\",\"reason\":\"一句中文理由\"}。");
+        JsonNode json = callJson(prompt.system(), prompt.user(), 40);
         String target = resolveId(game, textOrNull(json, "targetId"));
         log.info("Werewolf AI seer check: {} ({})", target, textOrNull(json, "reason"));
         return target;
@@ -107,14 +105,13 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
     @Override
     public Boolean chooseWitchSave(WerewolfGame game, WerewolfGame.Player witch, WerewolfGame.Player victim) {
         if (!configured || witch == null || victim == null) return null;
-        String system = roleSystem(game, witch, """
-                你是女巫。只有你知道谁被狼人袭击。判断是否值得用掉唯一的解药：
-                考虑首夜、死者是否像神职、是否可能是狼人自刀、后续局势。
-                输出 JSON：{"save":true/false,"reason":"一句中文理由"}
-                """);
-        String user = publicUser(game, "今晚被袭击的人：" + victim.getName() + "(" + victim.getId()
-                + ")\n\n是否使用解药？输出 JSON。");
-        JsonNode json = callJson(system, user, 35);
+        WerewolfPromptBuilder.Prompt prompt = WerewolfPromptBuilder.build(game, witch,
+                "你的身份是女巫。只有你知道谁被狼人袭击。判断是否值得用掉唯一的解药：\n"
+                        + "考虑首夜、死者是否像神职、是否可能是狼人自刀、后续局势。\n"
+                        + "今晚被袭击的人：" + victim.getName() + "(" + victim.getId() + ")",
+                "只输出一个 JSON 对象：{\"save\":true,\"reason\":\"一句中文理由\"} 或 "
+                        + "{\"save\":false,\"reason\":\"一句中文理由\"}。");
+        JsonNode json = callJson(prompt.system(), prompt.user(), 35);
         if (json == null || json.get("save") == null || json.get("save").isNull()) return null;
         boolean save = json.get("save").asBoolean();
         log.info("Werewolf AI witch save={} ({})", save, textOrNull(json, "reason"));
@@ -128,13 +125,13 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                 .filter(p -> !p.getId().equals(witch.getId()))
                 .map(p -> "- " + p.getName() + "(" + p.getId() + ")")
                 .collect(Collectors.joining("\n"));
-        String system = roleSystem(game, witch, """
-                你是女巫。判断是否使用唯一的毒药，以及毒谁。
-                优先考虑公开逻辑里最像狼人的人，避免毒明显好人。不想用毒时 targetId 输出 null。
-                输出 JSON：{"targetId":"pX 或 null","reason":"一句中文理由"}
-                """);
-        String user = publicUser(game, "可毒玩家：\n" + candidates + "\n\n请决定是否用毒，输出 JSON。");
-        JsonNode json = callJson(system, user, 35);
+        WerewolfPromptBuilder.Prompt prompt = WerewolfPromptBuilder.build(game, witch,
+                "你的身份是女巫。判断是否使用唯一的毒药，以及毒谁。\n"
+                        + "优先考虑公开逻辑里最像狼人的人，避免毒明显好人。不想用毒时 targetId 输出 null。\n"
+                        + "可毒玩家：\n" + candidates,
+                "只输出一个 JSON 对象：{\"targetId\":\"pX\"} 或 {\"targetId\":null}，"
+                        + "并带一句中文 reason。");
+        JsonNode json = callJson(prompt.system(), prompt.user(), 35);
         String target = resolveId(game, textOrNull(json, "targetId"));
         log.info("Werewolf AI witch poison: {} ({})", target, textOrNull(json, "reason"));
         return target;
@@ -175,12 +172,11 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                 .filter(p -> !p.getId().equals(voter.getId()))
                 .map(p -> "- " + p.getName() + "(" + p.getId() + ")")
                 .collect(Collectors.joining("\n"));
-        String system = roleSystem(game, voter, """
-                现在要投放逐票。狼人隐藏身份并投掉威胁最大的好人，不能投狼队友；
-                好人投最可疑的人。只输出 JSON：{"targetId":"pX","reason":"一句中文理由"}
-                """);
-        String user = publicUser(game, "可投票玩家：\n" + candidates + "\n\n请决定投谁，输出 JSON。");
-        JsonNode json = callJson(system, user, 40);
+        WerewolfPromptBuilder.Prompt prompt = WerewolfPromptBuilder.build(game, voter,
+                "现在要投放逐票。狼人隐藏身份并投掉威胁最大的好人，不能投狼队友；\n"
+                        + "好人投最可疑的人。\n可投票玩家：\n" + candidates,
+                "只输出一个 JSON 对象：{\"targetId\":\"pX\",\"reason\":\"一句中文理由\"}。");
+        JsonNode json = callJson(prompt.system(), prompt.user(), 40);
         return resolveId(game, textOrNull(json, "targetId"));
     }
 
@@ -191,12 +187,11 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
                 .filter(p -> !p.getId().equals(hunter.getId()))
                 .map(p -> "- " + p.getName() + "(" + p.getId() + ")")
                 .collect(Collectors.joining("\n"));
-        String system = roleSystem(game, hunter, """
-                你是猎人，刚刚出局，可以开枪带走一名存活玩家。选择最像狼人的目标。
-                只输出 JSON：{"targetId":"pX","reason":"一句中文理由"}
-                """);
-        String user = publicUser(game, "可开枪目标：\n" + candidates + "\n\n请决定带谁，输出 JSON。");
-        JsonNode json = callJson(system, user, 40);
+        WerewolfPromptBuilder.Prompt prompt = WerewolfPromptBuilder.build(game, hunter,
+                "你的身份是猎人，刚刚出局，可以开枪带走一名存活玩家。选择最像狼人的目标。\n"
+                        + "可开枪目标：\n" + candidates,
+                "只输出一个 JSON 对象：{\"targetId\":\"pX\",\"reason\":\"一句中文理由\"}。");
+        JsonNode json = callJson(prompt.system(), prompt.user(), 40);
         String target = resolveId(game, textOrNull(json, "targetId"));
         log.info("Werewolf AI hunter shot: {} ({})", target, textOrNull(json, "reason"));
         return target;
@@ -216,20 +211,18 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
             streamFallback(fallback, tokenSink);
             return fallback;
         }
-        String system = roleSystem(game, speaker, """
-                现在轮到你发言。
-                - 村民：分析怀疑对象和票型。
-                - 狼人：伪装成好人，可以甩锅/跟票/轻踩，但绝不能承认自己是狼。
-                - 预言家：可以暗示或公开查验，但要按你自己的判断。
-                - 女巫/猎人：不要主动把身份说死。
-                说 30～70 个中文字符，口语化，像 QQ 群里真人聊天。不要写玩家 ID，不要旁白。
-                """);
-        String user = publicUser(game, "请直接输出你要说的一句话。");
+        WerewolfPromptBuilder.Prompt prompt = WerewolfPromptBuilder.build(game, speaker,
+                "现在轮到你发言。\n"
+                        + "- 村民：分析怀疑对象和票型。\n"
+                        + "- 狼人：伪装成好人，可以甩锅/跟票/轻踩，但绝不能承认自己是狼。\n"
+                        + "- 预言家：可以暗示或公开查验，但要按你自己的判断。\n"
+                        + "- 女巫/猎人：不要主动把身份说死。",
+                "只输出一句 30～70 个中文字符的口语化台词；不要 JSON，不要 Markdown，不要旁白。");
         StringBuilder full = new StringBuilder();
         try {
             chatClient.prompt()
-                    .system(system)
-                    .user(user)
+                    .system(prompt.system())
+                    .user(prompt.user())
                     .stream()
                     .content()
                     .timeout(Duration.ofSeconds(45))
@@ -265,26 +258,6 @@ public class WerewolfAiService implements WerewolfGame.DecisionProvider {
     // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
-
-    private String roleSystem(WerewolfGame game, WerewolfGame.Player player, String instructions) {
-        return "你在进行一局中文狼人杀。\n"
-                + game.privateKnowledge(player)
-                + "你只能知道自己身份允许知道的信息；不知道其他玩家的秘密身份，除非规则公开。\n"
-                + instructions
-                + "\n只输出要求的格式，不要 markdown，不要解释。";
-    }
-
-    private String publicUser(WerewolfGame game, String tail) {
-        return "公开事件记录（从开局到现在的追加历史）：\n"
-                + game.publicTranscript()
-                + "\n\n当前存活玩家：\n"
-                + game.alivePlayersView().stream()
-                    .map(p -> "- " + p.getName() + "(" + p.getId() + ")"
-                            + (p.isHuman() ? " [人类]" : "")
-                            + (p.getClaimedRole() == null ? "" : " [自称" + p.getClaimedRole() + "]"))
-                    .collect(Collectors.joining("\n"))
-                + "\n\n" + tail;
-    }
 
     private JsonNode callJson(String system, String user, int timeoutSeconds) {
         try {

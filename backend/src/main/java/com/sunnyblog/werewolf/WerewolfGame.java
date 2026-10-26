@@ -322,6 +322,26 @@ public class WerewolfGame {
                 .collect(Collectors.joining("\n"));
     }
 
+    /**
+     * Append-only public broadcasts with stable sequence/round markers. This is
+     * the shared prefix of every seat prompt in the same game.
+     */
+    public String publicBroadcast() {
+        return logs.stream()
+                .filter(l -> l.privateTo() == null)
+                .map(l -> "[" + l.seq() + "][R" + l.round() + "][" + l.phaseLabel() + "] " + l.text())
+                .collect(Collectors.joining("\n"));
+    }
+
+    /** Private events visible to this seat, in the same chronological order. */
+    public String privateTimeline(Player viewer) {
+        if (viewer == null) return "";
+        return logs.stream()
+                .filter(l -> viewer.getId().equals(l.privateTo()))
+                .map(l -> "[" + l.seq() + "][R" + l.round() + "][" + l.phaseLabel() + "] " + l.text())
+                .collect(Collectors.joining("\n"));
+    }
+
     /** Only what this agent knows privately: role, potions, checks, wolf teammates. */
     public String privateKnowledge(Player viewer) {
         StringBuilder sb = new StringBuilder();
@@ -1319,7 +1339,9 @@ public class WerewolfGame {
         logSeq += 1;
         LogEntry entry = new LogEntry(logSeq, round, phase.name(), phase.getLabel(), type, text, privateTo);
         logs.add(entry);
-        if (logs.size() > 260) logs.remove(0);
+        // Do not trim the prefix here: public broadcasts are the cacheable prompt
+        // prefix for the whole game, and a self-contained game is bounded by its
+        // own action guard.
         if (eventListener != null) {
             try {
                 eventListener.onLog(entry);
