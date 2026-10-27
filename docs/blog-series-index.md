@@ -39,6 +39,7 @@
 2. [Agent 记忆、预检与任务前检索：让模型在动手前知道得更多](https://www.bluish-white.top/posts/agent-memory-preflight-retrieval)
 3. [SubAgent 独立验收：让另一个模型判断“真的完成了吗”](https://www.bluish-white.top/posts/agent-subagent-validation)
 4. [月白 Agent 性能复盘：126 次评测从 2 小时 17 分到 40 分 9 秒](https://www.bluish-white.top/posts/moonlight-agent-performance-review)
+5. [给月白 Agent 加上提示词缓存：命中率 55.9% → 70.9%，总成本下降 10%](https://www.bluish-white.top/posts/agent-prompt-cache-55-to-71)
 
 ### 2. 狼人杀
 
