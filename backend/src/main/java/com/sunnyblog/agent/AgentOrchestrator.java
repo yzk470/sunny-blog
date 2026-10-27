@@ -786,7 +786,7 @@ public class AgentOrchestrator {
     }
 
     public Validation validate(String task, String answer, String artifactManifest, String successCriteria) {
-        String system = """
+        String system = AgentPromptBuilder.withHeader("""
                 你是独立验收员。你只能看到用户任务、候选结果、产物目录清单和本任务的成功标准，看不到执行者的思考过程。
                 判断结果是否真正完成任务；如果只是声称做了、空泛、遗漏关键产物、或答非所问，就不通过。
                 如果任务要求生成文件（pptx/docx/xlsx/pdf/html/图片等），产物清单中必须有对应文件；
@@ -794,8 +794,9 @@ public class AgentOrchestrator {
                 如果任务只是要求写脚本并运行，执行证据中有成功的 run_script/run_command 和真实输出，
                 且候选结果给出脚本路径与结果，即使脚本在 workspace 而不在 artifacts，也可以通过；
                 只有用户明确要求交付脚本文件时才要求 artifacts 中有脚本。
+                reason 不超过 30 个中文字符。
                 只输出 JSON：{"passed":true/false,"reason":"一句中文理由"}。
-                """;
+                """);
         String user = "用户任务：\n" + task + "\n\n成功标准：\n"
                 + (successCriteria == null || successCriteria.isBlank() ? "产物真实可用，回答直接解决问题" : successCriteria)
                 + "\n\n候选结果：\n" + answer

@@ -126,6 +126,25 @@ export interface AgentFailureRow {
   count: number
 }
 
+export interface AgentCacheUsage {
+  calls: number
+  promptTokens: number
+  cachedTokens: number
+  missTokens: number
+  completionTokens: number
+  hitRate: number
+}
+
+export interface AgentCacheDay {
+  day: string
+  calls: number
+  promptTokens: number
+  cachedTokens: number
+  missTokens: number
+  completionTokens: number
+  hitRate: number
+}
+
 export interface AgentMetricTask {
   runId: string
   sessionId: string
@@ -291,6 +310,12 @@ export const agentApi = {
   },
   metricsFailures(days = 30) {
     return httpGet<AgentFailureRow[]>(`/admin/agent/metrics/failures?days=${days}`)
+  },
+  cacheUsage() {
+    return httpGet<AgentCacheUsage>('/admin/agent/cache-usage')
+  },
+  cacheHistory(days = 30) {
+    return httpGet<AgentCacheDay[]>(`/admin/agent/cache-history?days=${days}`)
   },
   metricsTasks(limit = 20, failureType = '', group = '') {
     const query = new URLSearchParams({ limit: String(limit) })

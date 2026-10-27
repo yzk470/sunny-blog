@@ -29,12 +29,13 @@ public class AgentSearchService {
         }
         if (llm.isConfigured()) {
             try {
-                String system = """
+                String system = AgentPromptBuilder.withHeader("""
                         你是搜索调度器。给每条候选路线打 0～100 分，预测它在当前任务上的成功率与成本。
                         评分考虑：可行性、验证难度、依赖风险、失败后是否容易回退。
-                        不要执行任务，只评分。只输出 JSON：
+                        不要执行任务，只评分。reason 不超过 20 个中文字符。
+                        只输出 JSON：
                         {"scores":[{"id":"s1","score":88,"reason":"一句理由"}]}
-                        """;
+                        """);
                 String user = "任务：\n" + task + "\n\n历史：\n" + memoryContext + "\n\n候选：\n"
                         + render(strategies);
                 JsonNode json = llm.completeJson(system, user, 40);

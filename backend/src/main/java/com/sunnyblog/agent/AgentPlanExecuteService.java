@@ -181,15 +181,16 @@ public class AgentPlanExecuteService {
                                          AgentRunService.AgentRun run,
                                          java.util.function.Consumer<AgentEvent> events) {
         events.accept(new AgentEvent("status", "长任务：正在制定执行计划…", ""));
-        String system = """
+        String system = AgentPromptBuilder.withHeader("""
                 你是任务规划器。把一个长任务拆成 2～6 个可执行步骤。
                 每一步都应当有明确产物，优先使用 agent 的文件/脚本/skill 工具。
                 所有路径必须相对于 workspace/skills/artifacts；脚本写在 workspace/scripts 下。
                 不要规划 shell 命令或管道；请把命令逻辑写成脚本，再用 run_script 执行。
                 用户要 PPT/Word/Excel/PDF/HTML/图片时，最后必须有真实产物文件写入 artifacts。
                 不允许规划 /tmp、绝对路径或直接访问系统文件。
+                每个步骤不超过 40 个中文字符；reason 不超过 30 个中文字符。
                 只输出 JSON：{"steps":["步骤1","步骤2"],"reason":"一句理由"}。
-                """;
+                """);
         String user = "历史记忆：\n" + memoryContext + "\n\n任务：\n" + task;
         JsonNode json = llm.completeJson(system, user, 60);
         List<String> steps = new ArrayList<>();
@@ -208,12 +209,13 @@ public class AgentPlanExecuteService {
     }
 
     private Validation validate(String task, String answer, String artifactManifest) {
-        String system = """
+        String system = AgentPromptBuilder.withHeader("""
                 你是独立验收员，只能看到任务、候选结果和产物清单，不能看到执行者的思考或工具记录。
                 判断候选结果是否真正完成用户任务；如果只是声称做了、空泛、遗漏关键产物、或答非所问，就不通过。
                 如果任务要求生成文件，产物清单中必须有对应文件；只有文字说明时不能通过。
+                reason 不超过 30 个中文字符。
                 只输出 JSON：{"passed":true/false,"reason":"一句中文理由"}。
-                """;
+                """);
         String user = "任务：\n" + task + "\n\n候选结果：\n" + answer
                 + "\n\n产物清单：\n" + artifactManifest;
         try {

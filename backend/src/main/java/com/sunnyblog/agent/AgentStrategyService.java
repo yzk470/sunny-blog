@@ -31,16 +31,17 @@ public class AgentStrategyService {
         int count = Math.max(2, Math.min(5, maxStrategies));
         List<AgentRunService.Strategy> strategies = new ArrayList<>();
         if (llm.isConfigured()) {
-            String system = """
+            String system = AgentPromptBuilder.withHeader("""
                     你是 Agent 策略规划器。失败是常态，不要假设第一条路线一定成功。
                     为一个任务设计 %d 条真正不同、可执行的候选路线，按成功概率排序。
                     每条路线说明：方法、主要风险、失败后的备选手段。
                     路线之间不能只是换个文件名或重复同一动作。
+                    approach 不超过 60 个中文字符；risk/fallback 各不超过 30 个中文字符。
                     只输出 JSON：
                     {"successCriteria":"怎样才算真正完成","strategies":[
                       {"title":"路线名","approach":"具体做法","risk":"最大风险","fallback":"失败后怎么换"}
                     ]}
-                    """.formatted(count);
+                    """.formatted(count));
             String user = "历史记忆：\n" + memoryContext + "\n\n任务：\n" + task;
             try {
                 JsonNode json = llm.completeJson(system, user, 60);

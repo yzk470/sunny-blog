@@ -7,6 +7,8 @@ import {
   type AgentMetricTask,
   type AgentMetrics,
   type AgentTrendRow,
+  type AgentCacheUsage,
+  type AgentCacheDay,
 } from '@/api/agent'
 import { useToastStore } from '@/stores/toast'
 
@@ -18,6 +20,8 @@ const summary = ref<AgentMetrics | null>(null)
 const trend = ref<AgentTrendRow[]>([])
 const failures = ref<AgentFailureRow[]>([])
 const tasks = ref<AgentMetricTask[]>([])
+const cacheUsage = ref<AgentCacheUsage | null>(null)
+const cacheHistory = ref<AgentCacheDay[]>([])
 const failureFilter = ref('')
 const groupFilter = ref('all')
 
@@ -35,14 +39,18 @@ const groupLabel = computed(() => ({
 async function load() {
   loading.value = true
   try {
-    const [s, t, f] = await Promise.all([
+    const [s, t, f, cu, ch] = await Promise.all([
       agentApi.metricsSummary(days.value),
       agentApi.metricsTrend(days.value),
       agentApi.metricsFailures(days.value),
+      agentApi.cacheUsage(),
+      agentApi.cacheHistory(days.value),
     ])
     summary.value = s
     trend.value = t
     failures.value = f
+    cacheUsage.value = cu
+    cacheHistory.value = ch
     await loadTasks()
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '加载执行统计失败', 'error')
@@ -161,6 +169,48 @@ onMounted(load)
       <article><span>高价值任务</span><strong>{{ summary.highValueTasks }}</strong></article>
       <article><span>分支展开</span><strong>{{ summary.branchesExpanded }}</strong></article>
     </div>
+
+    <div v-if="cacheUsage" class="metric-cards cache-cards">
+      <article>
+        <span>当前缓存命中率</span>
+        <strong>{{ percent(cacheUsage.hitRate) }}</strong>
+        <small>{{ cacheUsage.cachedTokens.toLocaleString() }} / {{ cacheUsage.promptTokens.toLocaleString() }} prompt tokens</small>
+      </article>
+      <article>
+        <span>当前进程调用</span>
+        <strong>{{ cacheUsage.calls }}</strong>
+        <small>重启后计数归零，历史见下方</small>
+      </article>
+      <article>
+        <span>未命中 tokens</span>
+        <strong>{{ cacheUsage.missTokens.toLocaleString() }}</strong>
+        <small>缓存优化空间</small>
+      </article>
+      <article>
+        <span>输出 tokens</span>
+        <strong>{{ cacheUsage.completionTokens.toLocaleString() }}</strong>
+        <small>当前进程累计</small>
+      </article>
+    </div>
+
+    <section v-if="cacheHistory.length" class="admin-panel cache-history-panel">
+      <div class="panel-head">
+        <h2>缓存命中率趋势</h2>
+        <span>近 {{ days }} 天 · {{ cacheHistory.length }} 天有数据</span>
+      </div>
+      <div class="cache-history-table">
+        <div class="cache-history-head">
+          <span>日期</span><span>命中率</span><span>calls</span><span>cached</span><span>miss</span>
+        </div>
+        <div v-for="row in cacheHistory" :key="row.day" class="cache-history-row">
+          <span>{{ row.day.slice(5) }}</span>
+          <strong>{{ percent(row.hitRate) }}</strong>
+          <span>{{ row.calls }}</span>
+          <span>{{ row.cachedTokens.toLocaleString() }}</span>
+          <span>{{ row.missTokens.toLocaleString() }}</span>
+        </div>
+      </div>
+    </section>
 
     <div class="metrics-columns">
       <section class="admin-panel">
@@ -301,4 +351,12 @@ td em { margin-left: 5px; padding: 1px 4px; border-radius: 4px; background: #f5e
 .status-dot.ok { color: #3f7c67; }
 .status-dot.bad { color: #a35b4f; }
 @media (max-width: 1100px) { .metric-cards { grid-template-columns: repeat(4, 1fr); } .metrics-columns { grid-template-columns: 1fr; } }
+.cache-cards article { border-left: 2px solid #b8d8cb; }
+.cache-cards article small { display: block; margin-top: 3px; color: #9ca8b0; font-size: 8px; }
+.cache-history-panel { margin-top: 14px; padding: 15px; }
+.cache-history-table { display: flex; flex-direction: column; gap: 2px; }
+.cache-history-head, .cache-history-row { display: grid; grid-template-columns: 64px 68px 56px 1fr 1fr; gap: 8px; align-items: center; padding: 5px 4px; font-size: 9px; }
+.cache-history-head { color: #98a3ab; border-bottom: 1px solid rgba(105, 126, 145, 0.12); }
+.cache-history-row { color: #6e8292; border-bottom: 1px solid rgba(105, 126, 145, 0.06); }
+.cache-history-row strong { color: #4e7d69; font-weight: 600; }
 </style>

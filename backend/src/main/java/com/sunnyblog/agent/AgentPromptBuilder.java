@@ -34,6 +34,11 @@ public class AgentPromptBuilder {
     public record Prompt(String system, String user) {
     }
 
+    /** Stable version header shared by Plan/Strategy/Search/Validation. */
+    public static String withHeader(String system) {
+        return "[AGENT_PROMPT_VERSION] " + VERSION + "\n" + system;
+    }
+
     public Prompt react(String baseSystem, String legacyUser,
                         String memoryContext, String task, String observations,
                         int step, int limit, int remaining,
@@ -41,7 +46,7 @@ public class AgentPromptBuilder {
         if (!mode.cacheFriendly()) {
             return new Prompt(baseSystem, legacyUser);
         }
-        String system = "[AGENT_PROMPT_VERSION] " + VERSION + "\n" + baseSystem;
+        String system = withHeader(baseSystem);
         StringBuilder user = new StringBuilder();
         user.append("## 历史记忆\n")
                 .append(memoryContext == null || memoryContext.isBlank() ? "（暂无历史记忆）" : memoryContext)
@@ -70,6 +75,7 @@ public class AgentPromptBuilder {
                 ## 输出格式
                 只输出一个 JSON 对象：
                 {"thought":"你在想什么","action":"工具名或 final","input":{...}}
+                thought 不超过 60 个中文字符；final 只写结论、产物路径和必要验证，不复述过程。
                 如果任务已经完成，action 使用 final，input 为 {"answer":"给用户的最终回答"}。
                 """);
         return new Prompt(system, user.toString());

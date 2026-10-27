@@ -116,6 +116,12 @@ public class AgentAdminController {
         return ApiResponse.ok(cacheUsage.snapshot());
     }
 
+    @GetMapping("/cache-history")
+    public ApiResponse<List<AgentCacheMetricRepository.DayRow>> cacheHistory(
+            @RequestParam(defaultValue = "30") int days) {
+        return ApiResponse.ok(cacheUsage.history(days));
+    }
+
     @DeleteMapping("/cache-usage")
     public ApiResponse<AgentCacheUsage.Snapshot> resetCacheUsage() {
         return ApiResponse.ok(cacheUsage.reset());
