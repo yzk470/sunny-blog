@@ -320,17 +320,19 @@ scopeViolations：0
 
 ## 十、当前限制
 
-### 1. 只有 ReAct 用了新 builder
+### 1. 只有 ReAct 做了完整重排
 
-Plan、Strategy、Search、Validation 仍然使用各自原有 prompt。
+Plan、Strategy、Search、Validation 已经加上统一版本头，但还没有像 ReAct 一样重排 user 区块。
 
-### 2. 输出成本没有优化
+### 2. 输出 token 只做了约束
 
-缓存只影响输入。
+新增了 thought / plan / reason 的长度限制，但没有在同一批任务上做输出 token 的严格 A/B。
 
-### 3. A/B 只跑了一轮
+### 3. 完整 A/B 是上一版缓存
 
-单轮数据会受到任务波动、长尾、缓存初始状态影响。
+上面的 126 次 A/B 是 ReAct prompt 重排后的数据。
+
+后续统一 Plan/Strategy/Search/Validation 与输出约束后，只做小样本验证，没有伪造成完整 126。
 
 ### 4. 安全任务仍有失败
 
@@ -338,20 +340,68 @@ Plan、Strategy、Search、Validation 仍然使用各自原有 prompt。
 
 ---
 
-## 十一、下一步
+## 十一、后续统一与小样本回归
+
+后续又补了三项：
 
 ```text
-把 Plan / Strategy / Search / Validation 也统一到稳定前缀
-继续降低输出 token
-把缓存命中率做成执行面板的长期指标
-再跑多轮 A/B 验证稳定性
+Plan / Strategy / Search / Validation 加统一版本头
+thought / plan / reason 增加长度约束
+缓存命中率写入 MySQL，并接入执行面板
+```
+
+小样本验证：
+
+```text
+6 个任务，dynamic 变体，workers=3
+不是完整 126
+```
+
+| 指标 | 数值 |
+|---|---:|
+| 任务数 | 6 |
+| 成功 | 6/6 |
+| scopeViolations | 0 |
+| LLM calls | 55 |
+| prompt tokens | 90,366 |
+| cached tokens | 59,904 |
+| miss tokens | 30,462 |
+| completion tokens | 25,101 |
+| 缓存命中率 | 66.29% |
+
+这组数据只说明统一后的链路能跑通，不冒充完整 benchmark。
+
+长期指标已经落到：
+
+```text
+agent_cache_daily
+```
+
+执行面板可以看到：
+
+```text
+当前进程缓存命中率
+每日缓存命中率趋势
+cached / miss tokens
+```
+
+样本太小，命中率低于完整 A/B 的 70.90%，不能据此判断统一前缀一定降低命中率。
+
+---
+
+## 十二、下一步
+
+```text
+在相同任务集上做输出 token 的前后对照
+再跑多轮完整 A/B 验证稳定性
 ```
 
 ---
 
-## 十二、数据出处
+## 十三、数据出处
 
-- A/B 报告：`benchmarks/agent/reports/agent-cache-ab.md`
+- 完整 A/B 报告：`benchmarks/agent/reports/agent-cache-ab.md`
+- 小样本报告：`benchmarks/agent/reports/cache-unified-smoke/latest.json`
 - [DeepSeek 官方价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 
 这次最重要的数字不是 7.3% 的 wall time 下降，而是：
