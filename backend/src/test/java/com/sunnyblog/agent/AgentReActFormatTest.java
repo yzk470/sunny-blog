@@ -42,7 +42,10 @@ class AgentReActFormatTest {
         when(skills.catalog()).thenReturn("skills");
         AgentRunService runs = mock(AgentRunService.class);
         AgentProperties properties = new AgentProperties();
-        AgentReActService service = new AgentReActService(llm, tools, skills, runs, properties, mapper);
+        AgentPromptMode promptMode = new AgentPromptMode();
+        promptMode.setCacheFriendly(false);
+        AgentReActService service = new AgentReActService(llm, tools, skills, runs, properties, mapper,
+                new AgentPromptBuilder(promptMode));
         AgentRunService.AgentRun run = new AgentRunService.AgentRun();
         run.setId("test");
 

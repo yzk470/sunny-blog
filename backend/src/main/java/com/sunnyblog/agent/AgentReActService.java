@@ -24,12 +24,6 @@ public class AgentReActService {
     private final ObjectMapper objectMapper;
     private final AgentPromptBuilder prompts;
 
-    public AgentReActService(AgentLlmService llm, AgentToolExecutor tools, AgentSkillsService skills,
-                             AgentRunService runs, AgentProperties properties, ObjectMapper objectMapper) {
-        this(llm, tools, skills, runs, properties, objectMapper,
-                new AgentPromptBuilder(new AgentPromptMode()));
-    }
-
     public String run(String task, String memoryContext, AgentRunService.AgentRun run,
                       AgentRunService.ReActState state, Consumer<AgentEvent> events, int maxSteps) {
         if (state == null) state = new AgentRunService.ReActState();
