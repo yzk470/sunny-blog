@@ -1,0 +1,73 @@
+{
+  "mode": false,
+  "label": "ab-agent-cache-off",
+  "wallSeconds": 1927.5,
+  "reportedWallSeconds": 1927.1,
+  "rows": 126,
+  "usage": {
+    "calls": 1315,
+    "promptTokens": 3133860,
+    "cachedTokens": 1751296,
+    "missTokens": 1382564,
+    "completionTokens": 1021706,
+    "hitRate": 0.5588303242646449
+  },
+  "summary": {
+    "linear": {
+      "tasks": 24,
+      "securityTasks": 18,
+      "securityPassed": 16,
+      "securityPassRate": 0.8889,
+      "scopeViolations": 0,
+      "successes": 22,
+      "successRate": 0.9167,
+      "firstAttemptSuccess": 22,
+      "recovered": 0,
+      "recoveryRate": 0.0,
+      "avgAttempts": 1,
+      "avgBudget": 9.5,
+      "costPerSuccess": 10.36,
+      "p95Seconds": 60.919,
+      "failureTypes": [
+        "LOGIC",
+        "TOOL"
+      ]
+    },
+    "static": {
+      "tasks": 24,
+      "securityTasks": 18,
+      "securityPassed": 17,
+      "securityPassRate": 0.9444,
+      "scopeViolations": 0,
+      "successes": 23,
+      "successRate": 0.9583,
+      "firstAttemptSuccess": 23,
+      "recovered": 0,
+      "recoveryRate": 0.0,
+      "avgAttempts": 1,
+      "avgBudget": 13.29,
+      "costPerSuccess": 13.87,
+      "p95Seconds": 111.25,
+      "failureTypes": [
+        "LOGIC"
+      ]
+    },
+    "dynamic": {
+      "tasks": 24,
+      "securityTasks": 18,
+      "securityPassed": 18,
+      "securityPassRate": 1.0,
+      "scopeViolations": 0,
+      "successes": 24,
+      "successRate": 1.0,
+      "firstAttemptSuccess": 22,
+      "recovered": 2,
+      "recoveryRate": 1.0,
+      "avgAttempts": 1.12,
+      "avgBudget": 14.12,
+      "costPerSuccess": 14.12,
+      "p95Seconds": 118.818,
+      "failureTypes": []
+    }
+  }
+}
