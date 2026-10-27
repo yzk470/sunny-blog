@@ -22,6 +22,13 @@ public class AgentReActService {
     private final AgentRunService runs;
     private final AgentProperties properties;
     private final ObjectMapper objectMapper;
+    private final AgentPromptBuilder prompts;
+
+    public AgentReActService(AgentLlmService llm, AgentToolExecutor tools, AgentSkillsService skills,
+                             AgentRunService runs, AgentProperties properties, ObjectMapper objectMapper) {
+        this(llm, tools, skills, runs, properties, objectMapper,
+                new AgentPromptBuilder(new AgentPromptMode()));
+    }
 
     public String run(String task, String memoryContext, AgentRunService.AgentRun run,
                       AgentRunService.ReActState state, Consumer<AgentEvent> events, int maxSteps) {
@@ -69,7 +76,7 @@ public class AgentReActService {
             state.setObservations(observations.toString());
             runs.checkpoint(run);
             int remaining = limit - step - 1;
-            String user = """
+            String legacyUser = """
                     %s
 
                     ## 已执行动作与观察
@@ -108,13 +115,16 @@ public class AgentReActService {
                             ? "## 已真实执行成功\n真实输出：\n" + clip(lastExecutionOutput, 1500)
                             + "\n如果当前路线已经满足任务成功标准，立即 final；否则只做必要的只读验证，不要重复已经成功的写文件/运行动作。"
                             : "");
+            AgentPromptBuilder.Prompt prompt = prompts.react(systemPrompt(limit), legacyUser,
+                    memoryContext, task, observations.toString(), step + 1, limit, remaining,
+                    executionSucceeded, lastExecutionOutput);
 
             AgentEvent status = new AgentEvent("status",
                     "第 " + (step + 1) + "/" + limit + " 步：模型正在判断…（剩余 " + remaining + " 步）", "");
             events.accept(status);
             String raw;
             try {
-                raw = llm.complete(systemPrompt(limit), user, 90);
+                raw = llm.complete(prompt.system(), prompt.user(), 90);
             } catch (Exception ex) {
                 runs.addStep(run, "ERROR", "模型调用失败", ex.getMessage(), false);
                 throw ex;

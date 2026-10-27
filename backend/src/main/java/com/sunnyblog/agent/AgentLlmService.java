@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,7 @@ public class AgentLlmService {
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final AgentCacheUsage cacheUsage;
     private final boolean configured;
     // Model calls are I/O-bound. A dedicated virtual-thread executor avoids
     // the shared ForkJoinPool throughput limit (which is CPU-count bound).
@@ -28,10 +30,12 @@ public class AgentLlmService {
 
     public AgentLlmService(ObjectProvider<ChatClient.Builder> builderProvider,
                            ObjectMapper objectMapper,
+                           AgentCacheUsage cacheUsage,
                            @Value("${spring.ai.openai.api-key:}") String apiKey) {
         ChatClient.Builder builder = builderProvider.getIfAvailable();
         this.chatClient = builder == null ? null : builder.build();
         this.objectMapper = objectMapper;
+        this.cacheUsage = cacheUsage;
         this.configured = chatClient != null && apiKey != null && !apiKey.isBlank();
         if (!configured) {
             log.warn("Agent AI is disabled: no model API key configured");
@@ -52,12 +56,16 @@ public class AgentLlmService {
         Exception last = null;
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
-                String content = CompletableFuture.supplyAsync(() -> chatClient.prompt()
+                ChatResponse response = CompletableFuture.supplyAsync(() -> chatClient.prompt()
                                 .system(system)
                                 .user(user)
                                 .call()
-                                .content(), modelExecutor)
+                                .chatResponse(), modelExecutor)
                         .get(Math.max(10, timeoutSeconds), TimeUnit.SECONDS);
+                recordUsage(response);
+                String content = response == null || response.getResult() == null
+                        || response.getResult().getOutput() == null
+                        ? null : response.getResult().getOutput().getContent();
                 if (content == null || content.isBlank()) {
                     throw new IllegalStateException("模型返回为空");
                 }
@@ -78,6 +86,26 @@ public class AgentLlmService {
         log.warn("Agent model call failed: {}", last == null ? "unknown" : last.getMessage());
         throw new IllegalStateException("Agent 模型调用失败: "
                 + (last == null ? "unknown" : last.getMessage()), last);
+    }
+
+    private void recordUsage(ChatResponse response) {
+        if (response == null || response.getMetadata() == null) return;
+        Object usage = response.getMetadata().getUsage();
+        if (usage == null) return;
+        Number prompt = number(usage, "getPromptTokens");
+        Number completion = number(usage, "getCompletionTokens");
+        if (completion == null) completion = number(usage, "getGenerationTokens");
+        Number cached = number(usage, "getPromptTokensDetailsCachedTokens");
+        cacheUsage.record(prompt, cached, completion);
+    }
+
+    private Number number(Object target, String method) {
+        try {
+            Object value = target.getClass().getMethod(method).invoke(target);
+            return value instanceof Number n ? n : null;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     public JsonNode completeJson(String system, String user, int timeoutSeconds) {

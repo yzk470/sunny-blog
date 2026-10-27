@@ -25,6 +25,11 @@ public class AgentAdminController {
     private final AgentArtifactService artifacts;
     private final AgentMetricsService metrics;
     private final AgentBenchmarkService benchmark;
+    private final AgentCacheUsage cacheUsage;
+    private final AgentPromptMode promptMode;
+
+    public record CacheModeRequest(Boolean enabled) {
+    }
 
     public record SkillRequest(String slug, String name, String description, String content) {
     }
@@ -104,6 +109,26 @@ public class AgentAdminController {
                 run.getMode(), run.getQuestion(), run.getStatus(), run.getAnswer(),
                 run.getValidation(), run.getCreatedAt(), run.getUpdatedAt(), run.getEventSeq(),
                 run.getSteps() == null ? List.of() : run.getSteps()));
+    }
+
+    @GetMapping("/cache-usage")
+    public ApiResponse<AgentCacheUsage.Snapshot> cacheUsage() {
+        return ApiResponse.ok(cacheUsage.snapshot());
+    }
+
+    @DeleteMapping("/cache-usage")
+    public ApiResponse<AgentCacheUsage.Snapshot> resetCacheUsage() {
+        return ApiResponse.ok(cacheUsage.reset());
+    }
+
+    @GetMapping("/cache-mode")
+    public ApiResponse<Boolean> cacheMode() {
+        return ApiResponse.ok(promptMode.cacheFriendly());
+    }
+
+    @PostMapping("/cache-mode")
+    public ApiResponse<Boolean> cacheMode(@RequestBody CacheModeRequest request) {
+        return ApiResponse.ok(promptMode.setCacheFriendly(Boolean.TRUE.equals(request.enabled())));
     }
 
     @GetMapping("/metrics")
