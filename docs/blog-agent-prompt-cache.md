@@ -389,7 +389,88 @@ cached / miss tokens
 
 ---
 
-## 十二、下一步
+## 十二、为什么没有改用 canonical message list
+
+编程 Agent 更容易接近 99% 命中率，是因为它们通常维护一条持续追加的消息列表：
+
+```text
+system
+tools
+项目上下文
+历史消息
+新的工具结果
+新的用户消息
+```
+
+下一轮只追加，前面的前缀几乎不变。
+
+月白 Agent 当前选择的是另一种架构：
+
+```text
+每次调用重新构造 system + user
+```
+
+这条路的缓存上限更低，但换来了几个更重要的东西。
+
+### 当前架构的好处
+
+```text
+1. 上下文可控
+   每次决定放多少记忆、多少 observations、哪些工具结果要截断。
+
+2. 隔离简单
+   ReAct / Plan / Strategy / Search / Validation 各自构造 prompt，互不污染。
+
+3. 重试和恢复简单
+   checkpoint 只需要保存 task / observations / step / budget / strategy，
+   不需要维护消息 id、工具调用配对和失败残留消息。
+
+4. 安全边界清楚
+   工具输出可以明确标记为“观察”，避免直接变成可执行指令。
+
+5. 不绑定 provider 协议
+   当前是 system + user 字符串，换模型或网关更容易。
+
+6. 方便调试
+   system、memory、observations、当前任务各自独立，出问题能直接定位。
+```
+
+### canonical message list 的代价
+
+```text
+消息存储
+上下文压缩 / 摘要
+敏感信息删除
+重试 attempt 隔离
+多 Agent 命名空间
+tool_call 与 tool_result 配对
+上下文窗口管理
+```
+
+这些不是不能做，而是会把当前“短任务、多角色、强隔离、可恢复”的复杂度再放大一层。
+
+### 什么时候值得换
+
+```text
+任务变成长期会话
+工具协议稳定
+角色收敛为单一 Agent
+主要工作是读文件、改代码、跑命令
+```
+
+那时可以把 **ReAct 单独**升级成 append-only 消息层，而不是把所有 Agent 类型都绑到一条消息历史上。
+
+### 结论
+
+```text
+70% 不是“实现差”，而是当前架构和统计口径的结果。
+canonical message list 适合长期、单角色、工具稳定的编程 Agent。
+当前架构适合短任务、多角色、强隔离、可恢复的通用 Agent。
+```
+
+---
+
+## 十三、下一步
 
 ```text
 在相同任务集上做输出 token 的前后对照
@@ -398,7 +479,7 @@ cached / miss tokens
 
 ---
 
-## 十三、数据出处
+## 十四、数据出处
 
 - 完整 A/B 报告：`benchmarks/agent/reports/agent-cache-ab.md`
 - 小样本报告：`benchmarks/agent/reports/cache-unified-smoke/latest.json`
