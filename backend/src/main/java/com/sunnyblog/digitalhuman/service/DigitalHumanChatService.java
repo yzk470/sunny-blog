@@ -434,7 +434,7 @@ public class DigitalHumanChatService {
             messages.add(new SystemMessage(extraSystem));
         }
         int start = 0;
-        List<DhMessage> all = sessionService.history(sessionId, 0);
+        List<DhMessage> all = ignoredHistory;
         for (int i = 0; i < all.size(); i++) {
             if (all.get(i).getId() != null && all.get(i).getId() <= state.summaryUptoId()) start = i + 1;
         }
@@ -493,6 +493,7 @@ public class DigitalHumanChatService {
         Object usage = response.getMetadata().getUsage();
         int prompt = number(usage, "getPromptTokens");
         int completion = number(usage, "getCompletionTokens");
+        if (completion == 0) completion = number(usage, "getGenerationTokens");
         int cached = number(usage, "getPromptTokensDetailsCachedTokens");
         return new Usage(prompt, cached, completion);
     }
