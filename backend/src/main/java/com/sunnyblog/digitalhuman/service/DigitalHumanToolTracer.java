@@ -21,6 +21,10 @@ public class DigitalHumanToolTracer {
                 .toList();
     }
 
+    public List<DigitalHumanToolCallService.ToolCallRow> calls(Long sessionId) {
+        return toolCalls.list(sessionId);
+    }
+
     private FunctionCallback wrapOne(Long sessionId, FunctionCallback delegate) {
         return new FunctionCallback() {
             @Override

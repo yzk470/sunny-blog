@@ -19,6 +19,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.ObjectProvider;
@@ -27,8 +28,11 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -404,6 +408,30 @@ public class DigitalHumanChatService {
         return new PlainReply(reply, emotion, usage(response));
     }
 
+    private record TraceEvent(LocalDateTime at, int order, DhMessage message,
+                              DigitalHumanToolCallService.ToolCallRow tool) {
+    }
+
+    private void addTextMessage(List<Message> messages, DhMessage message) {
+        if ("USER".equalsIgnoreCase(message.getRole())) {
+            messages.add(new UserMessage(message.getContent()));
+        } else if ("ASSISTANT".equalsIgnoreCase(message.getRole())) {
+            messages.add(new AssistantMessage(message.getContent()));
+        }
+    }
+
+    private void addToolMessages(List<Message> messages, DigitalHumanToolCallService.ToolCallRow tool) {
+        String id = tool.toolCallId() == null || tool.toolCallId().isBlank()
+                ? "call_" + tool.id() : tool.toolCallId();
+        String name = tool.toolName() == null ? "article_tool" : tool.toolName();
+        String arguments = tool.arguments() == null ? "{}" : tool.arguments();
+        String result = tool.result() == null ? "" : tool.result();
+        AssistantMessage.ToolCall call = new AssistantMessage.ToolCall(id, "function", name, arguments);
+        messages.add(new AssistantMessage("", Map.of(), List.of(call)));
+        messages.add(new ToolResponseMessage(List.of(
+                new ToolResponseMessage.ToolResponse(id, name, result))));
+    }
+
     private List<Message> canonicalMessages(DhCharacter character, Long sessionId,
                                             List<DhMessage> ignoredHistory, String userContent,
                                             String articleSlug, String extraSystem) {
@@ -435,16 +463,36 @@ public class DigitalHumanChatService {
         }
         int start = 0;
         List<DhMessage> all = ignoredHistory;
+        long summaryUptoId = state.summaryUptoId();
         for (int i = 0; i < all.size(); i++) {
-            if (all.get(i).getId() != null && all.get(i).getId() <= state.summaryUptoId()) start = i + 1;
+            if (all.get(i).getId() != null && all.get(i).getId() <= summaryUptoId) start = i + 1;
         }
+        LocalDateTime cutoff = all.stream()
+                .filter(m -> m.getId() != null && m.getId() == summaryUptoId)
+                .map(DhMessage::getCreatedAt)
+                .findFirst().orElse(null);
+        List<TraceEvent> events = new ArrayList<>();
         for (int i = start; i < all.size(); i++) {
             DhMessage message = all.get(i);
             if (message.getContent() == null || message.getContent().isBlank()) continue;
             if ("USER".equalsIgnoreCase(message.getRole())) {
-                messages.add(new UserMessage(message.getContent()));
+                events.add(new TraceEvent(message.getCreatedAt(), 0, message, null));
             } else if ("ASSISTANT".equalsIgnoreCase(message.getRole())) {
-                messages.add(new AssistantMessage(message.getContent()));
+                events.add(new TraceEvent(message.getCreatedAt(), 2, message, null));
+            }
+        }
+        for (DigitalHumanToolCallService.ToolCallRow tool : toolTracer.calls(sessionId)) {
+            if (cutoff != null && tool.createdAt() != null && tool.createdAt().isBefore(cutoff)) continue;
+            events.add(new TraceEvent(tool.createdAt(), 1, null, tool));
+        }
+        events.sort(Comparator.comparing(TraceEvent::at,
+                        Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparingInt(TraceEvent::order));
+        for (TraceEvent event : events) {
+            if (event.message() != null) {
+                addTextMessage(messages, event.message());
+            } else if (event.tool() != null) {
+                addToolMessages(messages, event.tool());
             }
         }
         messages.add(new UserMessage(userContent));
