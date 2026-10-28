@@ -141,7 +141,7 @@ public class DigitalHumanStreamService {
 
             MotionStreamParser parser = new MotionStreamParser(legacyTagFilter::accept, motionConsumer);
             Flux<String> tokens = chatService.streamReply(
-                    character, history, request.content().trim(), request.articleSlug());
+                    character, session.getId(), history, request.content().trim(), request.articleSlug());
 
             tokens.doOnNext(parser::accept).blockLast(Duration.ofMinutes(5));
             parser.finish();

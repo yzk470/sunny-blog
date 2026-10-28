@@ -70,6 +70,12 @@ public class DigitalHumanController {
         return ApiResponse.ok();
     }
 
+    @Operation(summary = "和数字人对话（纯文字，不走 TTS/动作，用于长会话测试）")
+    @PostMapping("/chat/plain")
+    public ApiResponse<DigitalHumanChatService.PlainReply> chatPlain(@Valid @RequestBody DhChatRequest request) {
+        return ApiResponse.ok(chatService.plainReply(request));
+    }
+
     @Operation(summary = "和数字人对话（SSE 流式文字 + 语音）")
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@Valid @RequestBody DhChatRequest request) {
