@@ -52,6 +52,7 @@
 1. [数字人人设工程：从公开资料到 persona v2](https://www.bluish-white.top/posts/digital-human-persona-engineering)
 2. [数字人对话流水线：读博客、查工具、记住上下文](https://www.bluish-white.top/posts/digital-human-chat-pipeline)
 3. [数字人的声音与动作：两条流怎么同时跑起来](https://www.bluish-white.top/posts/digital-human-voice-motion-sync)
+4. [数字人长会话改造：canonical message list、摘要与工具追踪](https://www.bluish-white.top/posts/digital-human-canonical-messages)
 
 ---
 
