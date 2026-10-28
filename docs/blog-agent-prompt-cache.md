@@ -222,6 +222,34 @@ prompt tokens 反而增加了 3%
 
 但命中率提升的幅度更大，所以输入成本仍然下降。
 
+### 峰值口径
+
+上面的 70.90% 是整场汇总：
+
+```text
+总 cached tokens / 总 prompt tokens
+```
+
+历史 A/B 的 `cache-usage.json` 只保存了整场合计，没有逐轮 `cached / prompt`，所以不能从这份记录里算出“最高单轮”。
+
+这里不把 70.90% 冒充成峰值。
+
+要看峰值，需要从下一轮开始额外记录：
+
+```text
+每一轮 cached tokens
+每一轮 prompt tokens
+每一轮 hit rate
+```
+
+然后同时报告：
+
+```text
+整场平均：看成本
+最高单轮：看缓存上限
+中位数 / P95：看稳定性
+```
+
 ---
 
 ## 七、按 DeepSeek-Flash 当前价格算

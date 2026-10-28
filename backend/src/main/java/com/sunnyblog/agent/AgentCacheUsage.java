@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Provider-side prompt-cache telemetry. The in-memory snapshot is the
@@ -16,6 +17,8 @@ import java.util.concurrent.atomic.AtomicLong;
 @Service
 @RequiredArgsConstructor
 public class AgentCacheUsage {
+
+    private static final int MIN_PEAK_PROMPT = 500;
 
     private final AgentCacheMetricRepository history;
 
@@ -30,9 +33,14 @@ public class AgentCacheUsage {
     private final AtomicLong pendingCached = new AtomicLong();
     private final AtomicLong pendingMiss = new AtomicLong();
     private final AtomicLong pendingCompletion = new AtomicLong();
+    private final AtomicReference<PeakCall> peak = new AtomicReference<>(new PeakCall(0, 0, 0));
+
+    public record PeakCall(double hitRate, long promptTokens, long cachedTokens) {
+    }
 
     public record Snapshot(long calls, long promptTokens, long cachedTokens, long missTokens,
-                           long completionTokens, double hitRate) {
+                           long completionTokens, double hitRate,
+                           double peakHitRate, long peakPromptTokens, long peakCachedTokens) {
     }
 
     public void record(Number prompt, Number cached, Number completion) {
@@ -51,13 +59,21 @@ public class AgentCacheUsage {
         pendingCached.addAndGet(c);
         pendingMiss.addAndGet(miss);
         pendingCompletion.addAndGet(out);
+        if (p >= MIN_PEAK_PROMPT) {
+            final long peakCached = c;
+            double rate = (double) peakCached / p;
+            peak.updateAndGet(old -> rate > old.hitRate()
+                    ? new PeakCall(rate, p, peakCached) : old);
+        }
     }
 
     public Snapshot snapshot() {
         long prompt = promptTokens.get();
         long cached = cachedTokens.get();
+        PeakCall max = peak.get();
         return new Snapshot(calls.get(), prompt, cached, missTokens.get(), completionTokens.get(),
-                prompt == 0 ? 0.0 : (double) cached / prompt);
+                prompt == 0 ? 0.0 : (double) cached / prompt,
+                max.hitRate(), max.promptTokens(), max.cachedTokens());
     }
 
     public Snapshot reset() {
@@ -72,6 +88,7 @@ public class AgentCacheUsage {
         pendingCached.set(0);
         pendingMiss.set(0);
         pendingCompletion.set(0);
+        peak.set(new PeakCall(0, 0, 0));
         return before;
     }
 
