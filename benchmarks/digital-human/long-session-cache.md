@@ -16,19 +16,19 @@ same canonical message list as the normal chat path, without audio or motion.
 ## 20 turns, with article tools
 
 ```text
-promptTokens: 88,358
-cachedTokens: 58,624
-missTokens: 29,734
-completionTokens: 9,193
-hitRate: 66.35%
+promptTokens: 123,016
+cachedTokens: 74,624
+missTokens: 48,392
+completionTokens: 10,923
+hitRate: 60.66%
 ```
 
 Persisted state:
 
 ```text
-summary length: 3,150 chars
-summary_upto_id: 241
-tool calls: search_articles 4, read_article 1
+summary length: 4,019 chars
+summary_upto_id: 305
+tool calls: search_articles 4, read_article 2
 ```
 
 ## 12 turns, no article tools
@@ -57,8 +57,9 @@ The no-tool session is the cleaner measurement of the append-only message list:
 84.30% on 12 turns
 ```
 
-The with-tool session includes tool-call turns that break reuse:
+The with-tool session now replays standard tool call / tool response messages.
+The article text itself is a large fresh payload, so prefix reuse is lower:
 
 ```text
-66.35% on 20 turns
+60.66% on 20 turns
 ```

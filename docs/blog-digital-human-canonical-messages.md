@@ -123,6 +123,7 @@ dh_tool_call
 
 ```text
 session_id
+tool_call_id
 tool_name
 arguments
 result
@@ -130,6 +131,16 @@ created_at
 ```
 
 文章工具 `search_articles`、`read_article` 的调用通过 wrapper 记录。
+
+下一轮构造 message list 时，会把它们还原成标准消息：
+
+```text
+AssistantMessage(tool_calls)
+ToolResponseMessage(tool_call_id, result)
+AssistantMessage(final text)
+```
+
+也就是说，工具调用不再只是旁路审计，而是成为 canonical message list 的一部分。
 
 ---
 
@@ -193,14 +204,16 @@ PCM
 ### 20 轮，带文章工具调用
 
 ```text
-prompt tokens：88,358
-cached tokens：58,624
-miss tokens：29,734
-completion tokens：9,193
-缓存命中率：66.35%
+prompt tokens：123,016
+cached tokens：74,624
+miss tokens：48,392
+completion tokens：10,923
+缓存命中率：60.66%
 ```
 
-工具调用会打断前缀复用，因此低于纯聊天。
+这一版已经回放标准工具消息，所以工具结果也进入了前缀。
+
+工具结果通常很长（`read_article` 最多 8000 字符），前几轮会明显增加 miss token，命中率比旁路审计时更低。
 
 ### 12 轮，不带工具
 
@@ -231,11 +244,15 @@ completion tokens：488
 尤其工具调用：
 
 ```text
-带工具的 20 轮：66.35%
+带工具的 20 轮：60.66%
 无工具的 12 轮：84.30%
 ```
 
-这不是 message list 无效，而是工具调用本身会让前缀不连续。
+这不是 message list 无效。
+
+工具结果现在按标准消息回放，正确性更好，但 `read_article` 的正文本身会带来大段新 token；工具定义、工具调用 id 和结果又必须保持逐字一致，任何一处变化都会让后续前缀失效。
+
+摘要触发时还会替换一条 system message，这同样会重置前缀。
 
 ---
 
@@ -244,9 +261,9 @@ completion tokens：488
 测试会话中：
 
 ```text
-摘要长度：3150 字符
-摘要覆盖到 message id：241
-工具调用：search_articles 4 次，read_article 1 次
+摘要长度：4019 字符
+摘要覆盖到 message id：305
+工具调用：search_articles 4 次，read_article 2 次
 ```
 
 说明：
@@ -254,6 +271,7 @@ completion tokens：488
 ```text
 摘要真的生成并落库
 工具调用真的被记录
+工具调用也会作为标准消息回放
 ```
 
 ---
@@ -307,7 +325,9 @@ canonical message list
 
 ```text
 无工具长会话：84.30%
-带工具长会话：66.35%
+带工具长会话：60.66%
 ```
 
-后续继续优化工具消息和摘要策略，才有机会继续接近编程 Agent 的水平。
+带工具低于无工具，不代表工具消息回放没价值；它说明：工具结果现在是真实上下文的一部分，正确性和缓存成本需要一起权衡。
+
+后续继续优化工具结果的压缩、摘要时机和 tool schema 稳定性，才有机会继续接近编程 Agent 的水平。
