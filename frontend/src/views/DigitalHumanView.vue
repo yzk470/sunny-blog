@@ -44,6 +44,9 @@ const previewUrl = ref('')
 const streamingReply = ref(false)
 const activePackMotion = ref('')
 const autoHunyuanLoading = ref(false)
+const physicsEnabled = ref(true)
+const physicsActive = ref(false)
+const physicsLoading = ref(false)
 
 let sceneManager: any = null
 let audio: HTMLAudioElement | null = null
@@ -798,6 +801,7 @@ async function initCharacter(code: string) {
       throw loaded.reason
     }
     sceneReady.value = true
+    syncPhysicsState()
     sceneManager.setEmotion('neutral')
     void sceneManager.startIdleMotion?.([
       '/motions/local/genshin-idle.vmd',
@@ -816,6 +820,24 @@ async function initCharacter(code: string) {
     error.value = err instanceof Error ? err.message : '数字人加载失败'
     loading.value = false
     sceneReady.value = false
+  }
+}
+
+function syncPhysicsState() {
+  physicsEnabled.value = !!sceneManager?.isPhysicsEnabled?.()
+  physicsActive.value = !!sceneManager?.isPhysicsActive?.()
+}
+
+async function togglePhysics() {
+  if (!sceneManager || physicsLoading.value) return
+  physicsLoading.value = true
+  try {
+    await sceneManager.setPhysicsEnabled(!physicsEnabled.value)
+  } catch (err) {
+    console.warn('[DigitalHuman] Physics toggle failed:', err)
+  } finally {
+    syncPhysicsState()
+    physicsLoading.value = false
   }
 }
 
@@ -1293,6 +1315,24 @@ onBeforeUnmount(() => {
               >
                 <span>{{ vmdPlaying ? '■' : '♫' }}</span>
                 {{ motionLoading ? '载入动作模组…' : vmdPlaying ? '停止手舞' : 'VMD 手舞 · 10 秒' }}
+              </button>
+
+              <button
+                type="button"
+                class="dance-btn physics-btn"
+                :class="{ active: physicsEnabled && physicsActive }"
+                :disabled="physicsLoading || !sceneReady"
+                :title="physicsEnabled && !physicsActive ? '当前模型没有可用的刚体，或物理已因不稳定自动关闭' : '头发 / 裙摆 Bullet 物理'"
+                @click="togglePhysics"
+              >
+                <span>{{ physicsEnabled ? '◉' : '○' }}</span>
+                {{
+                  physicsLoading
+                    ? '初始化物理…'
+                    : physicsEnabled
+                      ? physicsActive ? '物理效果 · 开' : '物理效果 · 不可用'
+                      : '物理效果 · 关'
+                }}
               </button>
 
               <div class="hunyuan-box">

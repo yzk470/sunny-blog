@@ -19,6 +19,40 @@ import { ExpressionEngine } from './ExpressionEngine.js';
 import { MotionEngine } from './MotionEngine.js';
 import { LipSync } from './LipSync.js';
 
+/**
+ * Upper bound of PMX rigid bodies we are willing to simulate. The bundled
+ * Ammo wasm has a fixed 64 MB heap; 镜流 (464 bodies / 736 constraints)
+ * exhausts it and corrupts every later character, so heavy rigs are skipped.
+ */
+const MAX_PHYSICS_BODIES = 420;
+/** Physics preference key (localStorage); URL ?physics=0/1 overrides it. */
+const PHYSICS_PREF_KEY = 'sunnyblog_dh_physics';
+/** Velocity guards in MMD units (unit-scale physics space). */
+const MAX_LINEAR_VELOCITY = 120;
+const MAX_ANGULAR_VELOCITY = 20;
+/**
+ * Motion-driven physics blend. Each simulated chain is weighted by how fast
+ * its anchor bone (nearest non-physics ancestor) moves: standing still shows
+ * the settled pose (no jitter), larger motions let more of the swing through.
+ */
+const ACTIVITY_ANGULAR_REF = 2.0;   // rad/s that counts as "full" motion
+const ACTIVITY_LINEAR_REF = 0.6;    // world units/s (model is ~2 units tall)
+const ACTIVITY_LOW = 0.12;          // below this the chain is fully calm
+const ACTIVITY_HIGH = 0.9;          // above this physics is fully applied
+const BLEND_ATTACK = 6;             // 1/s, how fast physics fades in
+const BLEND_RELEASE = 0.8;          // 1/s, slow fade-out = natural settling
+const OUTPUT_SMOOTHING = 10;        // 1/s, removes frame-to-frame flutter
+const MAX_SWING_ANGLE = THREE.MathUtils.degToRad(28); // per-bone swing at full motion
+const MAX_BONE_SPEED = THREE.MathUtils.degToRad(150); // rad/s cap on displayed swing
+const _blendP = new THREE.Vector3();
+const _blendQ = new THREE.Quaternion();
+const _blendS = new THREE.Vector3();
+const _blendTarget = new THREE.Quaternion();
+
+const HAIR_RE = /髪|髮|hair|尾|アホ毛|もみあげ|ahoge|辫|头发/i;
+const CLOTH_RE = /スカート|skirt|裙|裾|袖|sleeve|リボン|ribbon|紐|マント|cape|cloak|cloth|服|帯|飾|飘|飄|带|穗|tail|coat|コート/i;
+const BUST_RE = /胸|乳|bust|breast|oppai/i;
+
 export class SceneManager {
     /**
      * @param {HTMLCanvasElement} canvas
@@ -61,6 +95,13 @@ export class SceneManager {
         this._modelBaseQuaternion = null;
         this._physicsBoneNames = new Set();
         this._physicsAccumulator = 0;
+        this._physicsDynamicBodies = [];
+        this._physicsTmpVec = null;
+        this._physicsBoneRest = [];
+        this._physicsRawHeight = 1;
+        this._physicsResetTimes = [];
+        /** User preference for hair / skirt physics (default on). */
+        this.physicsEnabled = this._readPhysicsPreference();
 
         // ---- Dynamic character paths (set from API) ----
         /** @type {Map<string, string>} characterCode → modelPath */
@@ -263,6 +304,8 @@ export class SceneManager {
             script.onload = async () => {
                 try {
                     const factory = window.Ammo;
+                    // Note: the bundled wasm declares a fixed 64 MB maximum
+                    // heap, so INITIAL_MEMORY cannot be raised here.
                     const ammo = typeof factory === 'function' ? await factory() : factory;
                     window.Ammo = ammo;
                     console.log('[SceneManager] Ammo.js ready for MMD physics');
@@ -277,6 +320,103 @@ export class SceneManager {
         return this._ammoPromise;
     }
 
+    /**
+     * Physics preference: URL `?physics=0|1` wins, then localStorage,
+     * default on.
+     */
+    _readPhysicsPreference() {
+        try {
+            const query = new URLSearchParams(window.location.search).get('physics');
+            if (query === '0' || query === '1') return query === '1';
+            const stored = window.localStorage.getItem(PHYSICS_PREF_KEY);
+            if (stored === '0' || stored === '1') return stored === '1';
+        } catch {
+            // storage may be unavailable (private mode); fall through
+        }
+        return true;
+    }
+
+    /** @returns {boolean} whether Bullet physics is currently simulating */
+    isPhysicsActive() {
+        return !!this.physics;
+    }
+
+    /** @returns {boolean} user preference (may be on while the model has no rigid bodies) */
+    isPhysicsEnabled() {
+        return this.physicsEnabled;
+    }
+
+    /**
+     * Toggle hair / skirt physics at runtime.
+     * @param {boolean} enabled
+     * @returns {Promise<boolean>} whether physics is active afterwards
+     */
+    async setPhysicsEnabled(enabled) {
+        this.physicsEnabled = !!enabled;
+        try {
+            window.localStorage.setItem(PHYSICS_PREF_KEY, this.physicsEnabled ? '1' : '0');
+        } catch {
+            // ignore storage failures
+        }
+        const mesh = this.currentMesh;
+        if (!mesh) return false;
+        if (!this.physicsEnabled) {
+            if (this.physics) this._disposePhysics();
+            this._restorePhysicsBoneRest();
+            this._physicsBoneNames = new Set();
+        } else if (!this.physics) {
+            await this._setupPhysics(mesh);
+            this._restoreModelTransform(mesh);
+        }
+        // Idle clips were filtered for the previous physics bone set; rebuild.
+        this._idleClipCache = null;
+        this._idleClipCacheUrl = '';
+        if (this._idleVmdMixer && this._idleVmdUrl) {
+            const url = this._idleVmdUrl;
+            this.stopIdleMotion(false);
+            void this.playIdleMotion(url).catch(() => {
+                if (this.motionEngine) this.motionEngine.enabled = true;
+            });
+        }
+        return !!this.physics;
+    }
+
+    /**
+     * Classify PMX rigid bodies and tune them for a stable Bullet solve.
+     *
+     * - Bust bodies stay kinematic.
+     * - Type 1 (physics + bone position) becomes type 2 (physics, position
+     *   locked to the bone). Type 1 lets chains stretch and is the main
+     *   reason hair "launched" off-screen before.
+     * - Hair gets heavier damping than cloth so long chains settle quickly.
+     */
+    _tuneRigidBodies(rigidBodies) {
+        const stats = { hair: 0, cloth: 0, kinematic: 0 };
+        const tuned = rigidBodies.map((body) => {
+            const name = body.name ?? '';
+            if (body.type === 0 || BUST_RE.test(name)) {
+                stats.kinematic += 1;
+                return body.type === 0 ? body : { ...body, type: 0 };
+            }
+            const isHair = HAIR_RE.test(name) && !CLOTH_RE.test(name);
+            const pos = body.positionDamping ?? 0.5;
+            const rot = body.rotationDamping ?? 0.5;
+            if (isHair) stats.hair += 1;
+            else stats.cloth += 1;
+            return {
+                ...body,
+                type: 2,
+                weight: Math.max(body.weight ?? 1, 0.05),
+                // Heavier damping than the PMX defaults: MMD's own solver is
+                // far more damped than raw Bullet, which otherwise keeps
+                // skirts rippling like waves.
+                positionDamping: Math.min(0.98, Math.max(pos, isHair ? 0.85 : 0.8)),
+                rotationDamping: Math.min(0.98, Math.max(rot, isHair ? 0.93 : 0.9)),
+            };
+        });
+        return { tuned, stats };
+    }
+
     async _setupPhysics(mesh) {
         const data = mesh.geometry?.userData?.MMD;
         const rigidBodies = data?.rigidBodies ?? [];
@@ -284,22 +424,14 @@ export class SceneManager {
             console.log('[SceneManager] No PMX rigid bodies; physics skipped');
             return;
         }
-        // Bullet's PMX constraints are unstable for this asset: occasionally a
-        // hair chain gets a huge impulse and is launched off-screen. Keep the
-        // VMD hair/cloth tracks (they are not filtered while physics is off)
-        // and leave Bullet disabled by default. Add ?physics=1 locally only
-        // when deliberately debugging the solver.
-        if (new URLSearchParams(window.location.search).get('physics') !== '1') {
+        if (!this.physicsEnabled) {
             this._physicsBoneNames = new Set();
-            console.warn('[SceneManager] Bullet physics disabled; using VMD hair/cloth animation');
+            console.log('[SceneManager] Physics disabled by preference');
             return;
         }
-        // JINGLIU has 464 bodies / 736 constraints and exhausts the default
-        // Ammo heap, which then causes OOM for every later character too.
-        // Keep the stable model rather than corrupting the whole renderer.
-        if (rigidBodies.length > 420) {
+        if (rigidBodies.length > MAX_PHYSICS_BODIES) {
             this._physicsBoneNames = new Set();
-            console.warn(`[SceneManager] Physics skipped for heavy model (${rigidBodies.length} bodies) to avoid Ammo OOM`);
+            console.warn(`[SceneManager] Physics skipped for heavy model (${rigidBodies.length} bodies)`);
             return;
         }
         const baseScale = mesh.scale.clone();
@@ -308,31 +440,26 @@ export class SceneManager {
         const baseParent = mesh.parent;
         try {
             await this._loadAmmo();
-            // Long hair chains are much lighter than the skirt and tend to
-            // keep oscillating. Give only hair bodies extra damping; the skirt
-            // keeps its original, softer material parameters.
-            const tunedBodies = rigidBodies.map((body) => {
-                const isHair = /髪|髮|hair|尾/i.test(body.name ?? '');
-                if (!isHair) {
-                    // Skirts, capes and sleeves are the parts that explode
-                    // intermittently under Bullet while the VMD already
-                    // animates them. Keep only hair simulated; the rest stay
-                    // kinematic and follow their bone animation.
-                    return body.type === 0 ? body : { ...body, type: 0 };
-                }
-                return {
-                    ...body,
-                    positionDamping: Math.max(body.positionDamping ?? 0.5, 0.9),
-                    rotationDamping: Math.max(body.rotationDamping ?? 0.5, 0.92),
-                };
-            });
-            this.physics = new MMDPhysics(mesh, tunedBodies, data.constraints ?? [], {
+            if (mesh !== this.currentMesh || !this.physicsEnabled) return;
+            const { tuned, stats } = this._tuneRigidBodies(rigidBodies);
+            const physicsBoneNames = this._collectPhysicsBones(mesh, tuned);
+            this._capturePhysicsBoneRest(mesh, physicsBoneNames);
+            this.physics = new MMDPhysics(mesh, tuned, data.constraints ?? [], {
                 gravity: new THREE.Vector3(0, -9.8 * 10, 0),
-                maxStepNum: 2,
+                unitStep: 1 / 65,
+                maxStepNum: 3,
             });
-            this.physics.warmup(30);
-            this._physicsBoneNames = this._collectPhysicsBones(mesh, tunedBodies);
-            console.log(`[SceneManager] MMD physics ready: bodies=${tunedBodies.length}, constraints=${data.constraints?.length ?? 0}, dynamicBones=${this._physicsBoneNames.size}`);
+            this._physicsDynamicBodies = this.physics.bodies.filter((b) => b.params.type !== 0 && b.body);
+            this._physicsTmpVec = new window.Ammo.btVector3(0, 0, 0);
+            this._physicsResetTimes = [];
+            // MMDPhysics.reset() inside the constructor runs while the mesh is
+            // scaled, which places dynamic bodies at the wrong (scaled)
+            // positions. Re-seat them in unit space before warming up.
+            this._resetPhysicsBodies();
+            this.physics.warmup(120);
+            this._physicsBoneNames = physicsBoneNames;
+            this._initPhysicsBlend(mesh, physicsBoneNames);
+            console.log(`[SceneManager] MMD physics ready: bodies=${tuned.length} (hair=${stats.hair}, cloth=${stats.cloth}, kinematic=${stats.kinematic}), constraints=${data.constraints?.length ?? 0}, dynamicBones=${physicsBoneNames.size}`);
         } catch (err) {
             // MMDPhysics temporarily unsets mesh scale during initialization.
             // Restore it if the second model's physics data is incomplete.
@@ -361,6 +488,250 @@ export class SceneManager {
             if (bone?.name) names.add(bone.name);
         });
         return names;
+    }
+
+    _capturePhysicsBoneRest(mesh, names) {
+        const bones = mesh.skeleton?.bones ?? [];
+        this._physicsBoneRest = bones
+            .filter((bone) => names.has(bone.name))
+            .map((bone) => [bone, bone.quaternion.clone(), bone.position.clone()]);
+        const box = new THREE.Box3().setFromBufferAttribute(mesh.geometry.attributes.position);
+        this._physicsRawHeight = Math.max(box.max.y - box.min.y, 1);
+    }
+
+    /** Put simulated bones back to their bind pose (physics off / explosion). */
+    _restorePhysicsBoneRest() {
+        for (const [bone, quaternion, position] of this._physicsBoneRest ?? []) {
+            bone.quaternion.copy(quaternion);
+            bone.position.copy(position);
+        }
+        this.currentMesh?.updateMatrixWorld(true);
+    }
+
+    /**
+     * Re-seat every rigid body on its bone and zero velocities. Runs in the
+     * same unit-scale space MMDPhysics.update() uses.
+     */
+    _resetPhysicsBodies() {
+        const physics = this.physics;
+        const mesh = physics?.mesh;
+        if (!physics || !mesh) return;
+        const parent = mesh.parent;
+        const scale = mesh.scale.clone();
+        if (parent) mesh.parent = null;
+        mesh.scale.set(1, 1, 1);
+        mesh.updateMatrixWorld(true);
+        try {
+            physics.reset();
+            const zero = this._physicsTmpVec;
+            if (zero) {
+                zero.setValue(0, 0, 0);
+                for (const item of this._physicsDynamicBodies ?? []) {
+                    item.body.setLinearVelocity(zero);
+                    item.body.setAngularVelocity(zero);
+                    item.body.clearForces();
+                }
+            }
+        } finally {
+            if (parent) mesh.parent = parent;
+            mesh.scale.copy(scale);
+            mesh.updateMatrixWorld(true);
+        }
+        this._physicsAccumulator = 0;
+    }
+
+    /**
+     * Clamp runaway velocities and detect exploded / NaN bodies. Bullet's
+     * 6DOF springs occasionally inject a huge impulse into light hair chains;
+     * clamping keeps the motion natural instead of launching hair off-screen.
+     * @returns {boolean} true when the simulation had to be reset
+     */
+    _guardPhysics() {
+        const tmp = this._physicsTmpVec;
+        const mesh = this.currentMesh;
+        if (!tmp || !mesh) return false;
+        const maxLin2 = MAX_LINEAR_VELOCITY * MAX_LINEAR_VELOCITY;
+        const maxAng2 = MAX_ANGULAR_VELOCITY * MAX_ANGULAR_VELOCITY;
+        const limit = this._physicsRawHeight * 1.5;
+        const limit2 = limit * limit;
+        const ox = mesh.position.x;
+        const oy = mesh.position.y;
+        const oz = mesh.position.z;
+        let broken = false;
+        for (const item of this._physicsDynamicBodies ?? []) {
+            const body = item.body;
+            const lv = body.getLinearVelocity();
+            const lx = lv.x(); const ly = lv.y(); const lz = lv.z();
+            const l2 = lx * lx + ly * ly + lz * lz;
+            const av = body.getAngularVelocity();
+            const ax = av.x(); const ay = av.y(); const az = av.z();
+            const a2 = ax * ax + ay * ay + az * az;
+            const origin = body.getCenterOfMassTransform().getOrigin();
+            const dx = origin.x() - ox; const dy = origin.y() - oy; const dz = origin.z() - oz;
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (!Number.isFinite(l2) || !Number.isFinite(a2) || !Number.isFinite(d2) || d2 > limit2) {
+                broken = true;
+                break;
+            }
+            if (l2 > maxLin2) {
+                const k = MAX_LINEAR_VELOCITY / Math.sqrt(l2);
+                tmp.setValue(lx * k, ly * k, lz * k);
+                body.setLinearVelocity(tmp);
+            }
+            if (a2 > maxAng2) {
+                const k = MAX_ANGULAR_VELOCITY / Math.sqrt(a2);
+                tmp.setValue(ax * k, ay * k, az * k);
+                body.setAngularVelocity(tmp);
+            }
+        }
+        if (!broken) return false;
+
+        const now = performance.now();
+        this._physicsResetTimes = (this._physicsResetTimes ?? []).filter((t) => now - t < 3000);
+        this._physicsResetTimes.push(now);
+        if (this._physicsResetTimes.length > 5) {
+            console.warn('[SceneManager] MMD physics unstable for this model; disabled for this session');
+            this._disposePhysics();
+            this._restorePhysicsBoneRest();
+            return true;
+        }
+        console.warn('[SceneManager] MMD physics exploded; resetting rigid bodies');
+        this._restorePhysicsBoneRest();
+        this._resetPhysicsBodies();
+        for (const entry of this._physicsBlend?.entries ?? []) {
+            entry.raw.copy(entry.bone.quaternion);
+            entry.out.copy(entry.ref);
+        }
+        return true;
+    }
+
+    /**
+     * Build the display blend for simulated bones. The settled pose after
+     * warmup becomes the calm reference each chain returns to.
+     */
+    _initPhysicsBlend(mesh, names) {
+        const anchors = new Map();
+        const entries = [];
+        for (const bone of mesh.skeleton?.bones ?? []) {
+            if (!names.has(bone.name)) continue;
+            let anchorBone = bone.parent;
+            while (anchorBone?.isBone && names.has(anchorBone.name)) anchorBone = anchorBone.parent;
+            if (!anchorBone?.isBone) anchorBone = null;
+            let anchor = anchors.get(anchorBone);
+            if (!anchor) {
+                anchor = {
+                    bone: anchorBone,
+                    prevP: new THREE.Vector3(),
+                    prevQ: new THREE.Quaternion(),
+                    ready: false,
+                    weight: 0,
+                };
+                anchors.set(anchorBone, anchor);
+            }
+            entries.push({
+                bone,
+                anchor,
+                ref: bone.quaternion.clone(),
+                raw: bone.quaternion.clone(),
+                out: bone.quaternion.clone(),
+            });
+        }
+        this._physicsBlend = entries.length ? { entries, anchors: [...anchors.values()] } : null;
+    }
+
+    /** Measure how fast every chain anchor moves and ease its physics weight. */
+    _updatePhysicsActivity(delta) {
+        const blend = this._physicsBlend;
+        if (!blend) return;
+        const dt = Math.max(delta, 1 / 240);
+        for (const anchor of blend.anchors) {
+            if (!anchor.bone) {
+                anchor.weight = 0;
+                continue;
+            }
+            anchor.bone.matrixWorld.decompose(_blendP, _blendQ, _blendS);
+            if (!anchor.ready) {
+                anchor.prevP.copy(_blendP);
+                anchor.prevQ.copy(_blendQ);
+                anchor.ready = true;
+                continue;
+            }
+            const dot = Math.min(1, Math.abs(anchor.prevQ.dot(_blendQ)));
+            const angularSpeed = (2 * Math.acos(dot)) / dt;
+            const linearSpeed = _blendP.distanceTo(anchor.prevP) / dt;
+            anchor.prevP.copy(_blendP);
+            anchor.prevQ.copy(_blendQ);
+
+            const activity = angularSpeed / ACTIVITY_ANGULAR_REF + linearSpeed / ACTIVITY_LINEAR_REF;
+            const x = Math.min(1, Math.max(0, (activity - ACTIVITY_LOW) / (ACTIVITY_HIGH - ACTIVITY_LOW)));
+            const target = x * x * (3 - 2 * x);
+            const rate = target > anchor.weight ? BLEND_ATTACK : BLEND_RELEASE;
+            anchor.weight += (target - anchor.weight) * (1 - Math.exp(-rate * dt));
+        }
+    }
+
+    /** Show calm pose ↔ simulated pose according to anchor motion. */
+    _applyPhysicsBlend(delta) {
+        const blend = this._physicsBlend;
+        if (!blend) return;
+        const dt = Math.max(delta, 1 / 240);
+        const k = 1 - Math.exp(-OUTPUT_SMOOTHING * dt);
+        const maxStep = MAX_BONE_SPEED * dt;
+        for (const entry of blend.entries) {
+            entry.raw.copy(entry.bone.quaternion);
+            const weight = entry.anchor.weight;
+            _blendTarget.copy(entry.ref).slerp(entry.raw, weight);
+            // Swing amplitude grows with motion strength; Bullet's spring
+            // overshoot beyond that is cut off instead of shown as waves.
+            const maxDev = MAX_SWING_ANGLE * weight;
+            const dev = entry.ref.angleTo(_blendTarget);
+            if (dev > maxDev && dev > 1e-6) {
+                _blendTarget.copy(entry.ref).slerp(_blendTarget, maxDev / dev);
+            }
+            _blendQ.copy(entry.out).slerp(_blendTarget, k);
+            const step = entry.out.angleTo(_blendQ);
+            if (step > maxStep) {
+                entry.out.rotateTowards(_blendQ, maxStep);
+            } else {
+                entry.out.copy(_blendQ);
+            }
+            entry.bone.quaternion.copy(entry.out);
+        }
+    }
+
+    /** Fixed-step physics update; called after all bone animation for the frame. */
+    _stepPhysics(delta) {
+        if (!this.physics) return;
+        const blend = this._physicsBlend;
+        try {
+            // Bullet must keep integrating from its own (raw) result, not from
+            // the smoothed pose we displayed last frame.
+            if (blend) {
+                for (const entry of blend.entries) entry.bone.quaternion.copy(entry.raw);
+            }
+            this.currentMesh?.updateMatrixWorld(true);
+            this._updatePhysicsActivity(delta);
+
+            // Fixed 60 Hz stepping is much more stable than feeding a 120+ FPS
+            // render delta straight into Bullet.
+            this._physicsAccumulator += Math.min(delta, 1 / 20);
+            let steps = 0;
+            while (this.physics && this._physicsAccumulator >= 1 / 60 && steps < 3) {
+                this.physics.update(1 / 60);
+                this._physicsAccumulator -= 1 / 60;
+                steps += 1;
+                if (this._guardPhysics()) break;
+            }
+            if (steps === 3) this._physicsAccumulator = 0;
+            if (this.physics && blend && this._physicsBlend === blend) {
+                this._applyPhysicsBlend(delta);
+            }
+        } catch (err) {
+            this._disposePhysics();
+            this._restorePhysicsBoneRest();
+            this._restoreModelTransform(this.currentMesh);
+            console.warn('[SceneManager] MMD physics update failed:', err.message);
+        }
     }
 
     _filterPhysicsTracks(clip) {
@@ -414,6 +785,12 @@ export class SceneManager {
         const physics = this.physics;
         this.physics = null;
         this._physicsAccumulator = 0;
+        this._physicsDynamicBodies = [];
+        this._physicsBlend = null;
+        if (this._physicsTmpVec && window.Ammo?.destroy) {
+            try { window.Ammo.destroy(this._physicsTmpVec); } catch { /* ignore */ }
+        }
+        this._physicsTmpVec = null;
         if (!physics) return;
         const Ammo = window.Ammo;
         try {
@@ -609,6 +986,8 @@ export class SceneManager {
         this._modelBaseQuaternion = null;
         this._physicsBoneNames = new Set();
         this._physicsAccumulator = 0;
+        this._physicsBoneRest = [];
+        this._physicsResetTimes = [];
         this._idleClipCache = null;
         this._idleClipCacheUrl = '';
 
@@ -841,7 +1220,12 @@ export class SceneManager {
     _captureIdleBlend() {
         const skeleton = this.currentMesh?.skeleton;
         if (!skeleton) return;
-        this._idleBlend = skeleton.bones.map((bone) => [bone, bone.quaternion.clone()]);
+        // Simulated hair/skirt bones belong to Bullet; blending them would
+        // fight the solver for the first ~0.9 s of every idle loop.
+        const skip = this.physics ? this._physicsBoneNames : null;
+        this._idleBlend = skeleton.bones
+            .filter((bone) => !skip?.has(bone.name))
+            .map((bone) => [bone, bone.quaternion.clone()]);
         this._idleBlendElapsed = 0;
     }
 
@@ -1435,25 +1819,7 @@ export class SceneManager {
             if (this.lipSync) {
                 this.lipSync.update(delta);
             }
-            if (this.physics) {
-                try {
-                    // Fixed 60 Hz stepping is much more stable than feeding
-                    // a 120+ FPS render delta straight into Bullet.
-                    this._physicsAccumulator += Math.min(delta, 1 / 20);
-                    let steps = 0;
-                    while (this._physicsAccumulator >= 1 / 60 && steps < 2) {
-                        this.physics.update(1 / 60);
-                        this._physicsAccumulator -= 1 / 60;
-                        steps += 1;
-                    }
-                    if (steps === 2) this._physicsAccumulator = 0;
-                } catch (err) {
-                    this._restoreModelTransform(this.currentMesh);
-                    this.physics = null;
-                    this._physicsAccumulator = 0;
-                    console.warn('[SceneManager] MMD physics update failed:', err.message);
-                }
-            }
+            this._stepPhysics(delta);
             this._enforceModelTransform();
 
             // Render
