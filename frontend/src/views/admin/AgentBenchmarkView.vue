@@ -9,10 +9,12 @@ const toast = useToastStore()
 const status = ref<AgentBenchmarkStatus | null>(null)
 const running = ref(false)
 const loading = ref(true)
-const variants = ref<string[]>(['linear', 'static', 'dynamic'])
-const repeats = ref(3)
+const variants = ref<string[]>(['dynamic'])
+const repeats = ref(1)
 const workers = ref(4)
-const runGroup = ref<'capability' | 'security'>('capability')
+const runGroup = ref<'all' | 'capability' | 'security'>('all')
+const runSuite = ref<'both' | 'development' | 'generalization'>('both')
+const runLength = ref<'short' | 'medium' | 'long' | ''>('')
 const timer = ref<number | null>(null)
 
 const report = computed(() => {
@@ -30,6 +32,8 @@ const summaryRows = computed(() => {
 })
 
 const taskRows = computed(() => report.value?.rows || [])
+const generalizationGaps = computed(() => Object.entries(report.value?.generalizationGap || {})
+  .map(([variant, gap]: [string, any]) => ({ variant, ...gap })))
 
 async function refresh() {
   try {
@@ -52,6 +56,8 @@ async function start() {
       group: runGroup.value,
       workers: workers.value,
       taskIds: [],
+      suite: runSuite.value,
+      length: runLength.value || undefined,
     })
     running.value = true
     poll()
@@ -104,7 +110,7 @@ onBeforeUnmount(() => {
       <div>
         <p class="section-eyebrow">AGENT BENCHMARK</p>
         <h1>基准测试</h1>
-        <p>失败注入 + 三变体对比 + 每任务重复 3 次，真实调用模型和工具。</p>
+        <p>开发 / 泛化双套件：每套能力 30（短 6 / 中 16 / 长 8）+ 安全 10，skill 加载纳入执行链路。</p>
       </div>
       <button class="btn btn-ghost" :disabled="loading" @click="refresh">刷新</button>
     </div>
@@ -112,8 +118,18 @@ onBeforeUnmount(() => {
     <div class="benchmark-layout">
       <section class="admin-panel benchmark-form">
         <h2>运行配置</h2>
+        <label>任务套件</label>
+        <select v-model="runSuite">
+          <option value="both">开发 + 泛化（80 任务，检测过拟合）</option>
+          <option value="development">开发集（40 任务）</option>
+          <option value="generalization">泛化集（40 任务）</option>
+        </select>
         <label>测试类型</label>
         <div class="benchmark-groups">
+          <button type="button" :class="{ active: runGroup === 'all' }" @click="runGroup = 'all'; runLength = ''">
+            完整套件
+            <small>能力 + 安全</small>
+          </button>
           <button type="button" :class="{ active: runGroup === 'capability' }" @click="runGroup = 'capability'">
             能力稳定性
             <small>Agent 应该完成的任务</small>
@@ -123,6 +139,15 @@ onBeforeUnmount(() => {
             <small>Agent 不应该做到的事</small>
           </button>
         </div>
+        <template v-if="runGroup === 'capability'">
+          <label>能力任务长度</label>
+          <select v-model="runLength">
+            <option value="">全部长度（30 任务 / 套）</option>
+            <option value="short">短任务（6 / 套）</option>
+            <option value="medium">中任务（16 / 套）</option>
+            <option value="long">长任务（8 / 套）</option>
+          </select>
+        </template>
         <label>变体</label>
         <label v-for="item in [
           ['linear', '单路线基线：一条策略，16 预算'],
@@ -137,8 +162,8 @@ onBeforeUnmount(() => {
         <label>并发 workers</label>
         <input v-model.number="workers" type="number" min="1" max="12" />
         <p class="benchmark-note">
-          {{ runGroup === 'capability' ? '8 个能力任务' : '6 个安全任务' }} × 3 变体 × 3 次。
-          并发越高越快，但模型限流和 Office 竞争会导致超时；4 并发更稳定，6 并发可能增加安全任务误报。
+          每套 40 任务；泛化集与开发集按 pairId 对齐，报告给出成功率差值与退化题对。
+          默认 dynamic × 1 次；开启多变体或重复运行会显著增加模型调用与耗时。
         </p>
         <div class="benchmark-actions">
           <button class="btn btn-primary" :disabled="running" @click="start">
@@ -168,15 +193,21 @@ onBeforeUnmount(() => {
     </div>
 
     <section v-if="summaryRows.length" class="admin-panel benchmark-summary">
-      <h2>变体对比</h2>
+      <h2>套件 / 变体对比</h2>
       <div class="benchmark-table-wrap">
         <table>
-          <thead><tr><th>变体</th><th>合法任务</th><th>合法成功率</th><th>权限测试</th><th>权限通过率</th><th>越权次数</th><th>首次成功</th><th>恢复</th><th>平均尝试</th><th>平均预算</th><th>单成功成本</th><th>P95</th></tr></thead>
+          <thead><tr><th>套件 / 变体</th><th>能力任务</th><th>能力成功率</th><th>短 / 中 / 长</th><th>Skill 触发</th><th>安全任务</th><th>安全通过率</th><th>越权次数</th><th>首次成功</th><th>恢复</th><th>平均尝试</th><th>平均预算</th><th>单成功成本</th><th>P95</th></tr></thead>
           <tbody>
             <tr v-for="row in summaryRows" :key="row.variant">
               <td><strong>{{ row.variant }}</strong></td>
               <td>{{ row.tasks }}</td>
               <td>{{ pct(row.successRate) }}</td>
+              <td>
+                {{ pct(row.byLength?.short?.successRate) }} /
+                {{ pct(row.byLength?.medium?.successRate) }} /
+                {{ pct(row.byLength?.long?.successRate) }}
+              </td>
+              <td>{{ row.skillTriggered || 0 }}/{{ row.skillTasks || 0 }}（{{ pct(row.skillTriggerRate) }}）</td>
               <td>{{ row.securityTasks }}</td>
               <td>{{ row.securityTasks ? pct(row.securityPassRate) : '-' }}</td>
               <td>{{ row.scopeViolations }}</td>
@@ -192,16 +223,39 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <section v-if="generalizationGaps.length" class="admin-panel benchmark-summary">
+      <h2>泛化差距 <small>开发集 − 泛化集；正值越大，过拟合风险越高</small></h2>
+      <div class="benchmark-table-wrap">
+        <table>
+          <thead><tr><th>变体</th><th>能力成功率差</th><th>安全通过率差</th><th>Skill 触发率差</th><th>开发过 / 泛化失败题对</th></tr></thead>
+          <tbody><tr v-for="gap in generalizationGaps" :key="gap.variant">
+            <td>{{ gap.variant }}</td>
+            <td>{{ pct(gap.capabilitySuccessRateDelta) }}</td>
+            <td>{{ pct(gap.securityPassRateDelta) }}</td>
+            <td>{{ pct(gap.skillTriggerRateDelta) }}</td>
+            <td>{{ gap.regressedPairs || 0 }}</td>
+          </tr></tbody>
+        </table>
+      </div>
+    </section>
+
     <section v-if="taskRows.length" class="admin-panel benchmark-results">
       <h2>任务结果 <small>点击任务查看执行链路</small></h2>
       <div class="benchmark-table-wrap">
         <table>
-          <thead><tr><th>变体</th><th>任务</th><th>类型</th><th>注入</th><th>结果</th><th>尝试</th><th>预算</th><th>耗时</th><th>失败信息</th></tr></thead>
+          <thead><tr><th>套件 / 变体</th><th>任务</th><th>长度</th><th>类型</th><th>Skill trace</th><th>注入</th><th>结果</th><th>尝试</th><th>预算</th><th>耗时</th><th>失败信息</th></tr></thead>
           <tbody>
             <tr v-for="row in taskRows" :key="row.variant + row.task + row.taskId" class="clickable" @click="openTask(row.taskId)">
-              <td>{{ row.variant }}</td>
+              <td>{{ row.suite || 'development' }} / {{ row.variant }}</td>
               <td>{{ row.task }}</td>
-              <td><code>{{ row.policy ? 'POLICY' : 'TASK' }}</code></td>
+              <td>{{ row.group === 'security' ? '不分长短' : row.length }}</td>
+              <td><code>{{ row.group === 'security' ? 'SECURITY' : 'CAPABILITY' }}</code></td>
+              <td>
+                <template v-if="row.expectedSkills?.length">
+                  {{ row.skillPass ? '✓' : '✗' }} {{ row.triggeredSkills?.join(', ') || '未加载' }}
+                </template>
+                <span v-else>-</span>
+              </td>
               <td><code>{{ row.fault || '-' }}</code></td>
               <td><span :class="['status-dot', row.success ? 'ok' : 'bad']">{{ row.success ? '通过' : '失败' }}</span></td>
               <td>{{ row.attemptCount }}</td>
@@ -231,7 +285,8 @@ onBeforeUnmount(() => {
 .benchmark-groups button { border: 1px solid rgba(103, 126, 146, 0.18); border-radius: 10px; background: #f8fafb; padding: 9px; text-align: left; color: #60788c; font-size: 11px; cursor: pointer; }
 .benchmark-groups button small { display: block; margin-top: 3px; color: #9aa7b1; font-size: 9px; }
 .benchmark-groups button.active { border-color: #b99472; background: #faf4ec; color: #7f5b40; }
-.benchmark-form > input { width: 100%; padding: 8px; border: 1px solid rgba(103, 126, 146, 0.2); border-radius: 8px; box-sizing: border-box; }
+.benchmark-form > input, .benchmark-form > select { width: 100%; padding: 8px; border: 1px solid rgba(103, 126, 146, 0.2); border-radius: 8px; box-sizing: border-box; background: #fff; color: #526879; }
+.benchmark-summary h2 small { margin-left: 8px; color: #8a97a2; font-size: 10px; font-weight: 400; }
 .benchmark-check { display: flex !important; gap: 8px; align-items: flex-start; padding: 6px 0; cursor: pointer; }
 .benchmark-check input { margin-top: 3px; }
 .benchmark-check span { color: #7f8d99; font-size: 10px; line-height: 1.6; }
