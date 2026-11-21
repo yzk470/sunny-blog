@@ -92,10 +92,18 @@ def connect(values: dict[str, str]):
     return client
 
 
-def upload(client, local: Path, remote: str) -> None:
+def upload(client, local: Path, remote: str, unix_line_endings: bool = False) -> None:
     sftp = client.open_sftp()
     try:
-        sftp.put(str(local), remote)
+        if unix_line_endings:
+            # Git on Windows may check shell scripts out with CRLF, which turns
+            # `#!/bin/bash` into `#!/bin/bash\r` and makes sudo/systemd refuse
+            # to exec the sandbox runner. Always ship LF to Linux.
+            content = local.read_bytes().replace(b"\r\n", b"\n")
+            with sftp.open(remote, "wb") as handle:
+                handle.write(content)
+        else:
+            sftp.put(str(local), remote)
     finally:
         sftp.close()
 
@@ -105,7 +113,7 @@ def deploy(client) -> None:
     upload(client, JAR, f"{REMOTE}/incoming/sunny-blog.jar")
     upload(client, DIST_ARCHIVE, f"{REMOTE}/incoming/deploy-dist.tar.gz")
     upload(client, BENCH_ARCHIVE, f"{REMOTE}/incoming/benchmarks-agent.tar.gz")
-    upload(client, RUNNER, f"{REMOTE}/incoming/sunny-agent-run")
+    upload(client, RUNNER, f"{REMOTE}/incoming/sunny-agent-run", unix_line_endings=True)
 
     script = f"""
 set -e
@@ -125,6 +133,7 @@ chown -R sunnyblog:sunnyblog {REMOTE}
 getent group agentrun >/dev/null 2>&1 || groupadd -r agentrun
 id sunnyagent >/dev/null 2>&1 || useradd -r -g agentrun -M -s /usr/sbin/nologin sunnyagent
 usermod -aG agentrun sunnyblog
+sed -i 's/\\r$//' incoming/sunny-agent-run
 install -m 0755 incoming/sunny-agent-run /usr/local/bin/sunny-agent-run
 cat > /etc/sudoers.d/sunny-agent <<'SUDOERS'
 sunnyblog ALL=(root) NOPASSWD: /usr/local/bin/sunny-agent-run *

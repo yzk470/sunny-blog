@@ -35,7 +35,7 @@ public class AgentAdminController {
     }
 
     public record BenchmarkRequest(String variants, int repeats, String group, Integer workers,
-                                   List<String> taskIds) {
+                                   List<String> taskIds, String suite, String length) {
     }
 
     public record RunSummary(String id, String sessionId, String clientTaskId, String mode,
@@ -172,7 +172,8 @@ public class AgentAdminController {
         try {
             return ApiResponse.ok(benchmark.start(request.variants(),
                     request.repeats() <= 0 ? 3 : request.repeats(), request.group(),
-                    request.workers() == null ? 4 : request.workers(), request.taskIds()));
+                    request.workers() == null ? 4 : request.workers(), request.taskIds(),
+                    request.suite(), request.length()));
         } catch (Exception ex) {
             return ApiResponse.fail(500, ex.getMessage());
         }

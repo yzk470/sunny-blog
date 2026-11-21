@@ -96,7 +96,9 @@ app:
     max-output-chars: ${AGENT_MAX_OUTPUT_CHARS:12000}
     model: ${AGENT_MODEL:deepseek-flash}
     systemd-run: ${AGENT_SYSTEMD_RUN:false}
-    systemd-runtime-dir: ${AGENT_SYSTEMD_RUNTIME_DIR:/run/user/999}
+    # Deprecated: the sandbox wrapper runs as root and uses the system bus, so
+    # the JVM must not inject an unprivileged XDG_RUNTIME_DIR/DBUS address.
+    systemd-runtime-dir: ${AGENT_SYSTEMD_RUNTIME_DIR:}
     systemd-runner: ${AGENT_SYSTEMD_RUNNER:/usr/local/bin/sunny-agent-run}
     systemd-private-network: ${AGENT_SYSTEMD_PRIVATE_NETWORK:true}
   rag:

@@ -323,7 +323,7 @@ export const agentApi = {
     if (group) query.set('group', group)
     return httpGet<AgentMetricTask[]>(`/admin/agent/metrics/tasks?${query.toString()}`)
   },
-  startBenchmark(payload: { variants: string; repeats: number; group?: string; workers?: number; taskIds?: string[] }) {
+  startBenchmark(payload: { variants: string; repeats: number; group?: string; workers?: number; taskIds?: string[]; suite?: string; length?: string }) {
     return httpPost<AgentBenchmarkStatus>('/admin/agent/benchmark/start', payload)
   },
   benchmarkStatus() {

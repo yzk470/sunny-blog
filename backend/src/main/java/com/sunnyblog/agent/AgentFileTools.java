@@ -265,15 +265,19 @@ public class AgentFileTools {
             log.info("Agent executing {} in {} (systemd={})", command, cwd, properties.isSystemdRun());
             boolean isolated = properties.isSystemdRun();
             List<String> actualCommand = isolated ? systemdCommand(command, cwd) : command;
+            if (isolated) log.info("Agent sandbox command: {}", actualCommand);
             ProcessBuilder builder = new ProcessBuilder(actualCommand);
             if (!isolated) builder.directory(cwd.toFile());
             builder.redirectErrorStream(true);
             builder.environment().remove("DEEPSEEK_API_KEY");
             builder.environment().remove("OPENAI_API_KEY");
             if (isolated) {
-                builder.environment().put("XDG_RUNTIME_DIR", properties.getSystemdRuntimeDir());
-                builder.environment().put("DBUS_SESSION_BUS_ADDRESS",
-                        "unix:path=" + properties.getSystemdRuntimeDir() + "/bus");
+                // The wrapper runs as root via sudo and talks to the system
+                // systemd bus. Inheriting the unprivileged runtime dir makes
+                // systemd-run ask polkit, which fails with
+                // "Interactive authentication required".
+                builder.environment().remove("XDG_RUNTIME_DIR");
+                builder.environment().remove("DBUS_SESSION_BUS_ADDRESS");
             } else {
                 builder.environment().put("AGENT_WORKSPACE_DIR", workspaceRoot().toString());
                 builder.environment().put("AGENT_SKILLS_DIR", skillsRoot().toString());
